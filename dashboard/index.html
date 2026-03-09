@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Arbitrage Dashboard — Polymarket ↔ Kalshi</title>
+  <meta name="description"
+    content="Real-time cross-platform prediction market arbitrage scanner and trade execution dashboard." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css?v=2" />
+</head>
+
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-left">
+        <div class="logo">
+          <span class="logo-icon">◆</span>
+          <h1>Arb Scanner</h1>
+        </div>
+        <div class="connection-status" id="connection-status">
+          <span class="status-dot"></span>
+          <span class="status-text">Connecting...</span>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="stat-pill" id="pill-polymarket">
+          <span class="pill-label">Polymarket</span>
+          <span class="pill-value" id="pm-count">—</span>
+        </div>
+        <div class="stat-pill" id="pill-kalshi">
+          <span class="pill-label">Kalshi</span>
+          <span class="pill-value" id="k-count">—</span>
+        </div>
+        <div class="stat-pill" id="pill-pairs">
+          <span class="pill-label">Pairs</span>
+          <span class="pill-value" id="pairs-count">—</span>
+        </div>
+        <button class="kill-switch-btn" id="kill-switch-btn" title="Emergency Stop">
+          ⚡ KILL
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-grid">
+      <!-- Left Column: Opportunities -->
+      <section class="card opportunities-card">
+        <div class="card-header">
+          <h2>🔍 Live Opportunities</h2>
+          <span class="badge" id="opp-count">0</span>
+        </div>
+        <div class="opp-table-wrapper">
+          <table class="opp-table" id="opp-table">
+            <thead>
+              <tr>
+                <th>Event</th>
+                <th>PM YES</th>
+                <th>K YES</th>
+                <th>PM NO</th>
+                <th>K NO</th>
+                <th>Edge</th>
+                <th>Confidence</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="opp-tbody">
+              <tr class="empty-row">
+                <td colspan="8">Scanning for opportunities...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Right Column: Panels -->
+      <aside class="side-panels">
+        <!-- Risk Panel -->
+        <div class="card risk-card">
+          <div class="card-header">
+            <h2>🛡️ Risk Status</h2>
+            <span class="mode-badge" id="mode-badge">SEMI</span>
+          </div>
+          <div class="risk-metrics">
+            <div class="metric">
+              <span class="metric-label">Exposure</span>
+              <span class="metric-value" id="exposure-value">$0 / $500</span>
+              <div class="metric-bar">
+                <div class="metric-bar-fill" id="exposure-bar" style="width: 0%"></div>
+              </div>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Open Positions</span>
+              <span class="metric-value" id="positions-value">0 / 10</span>
+              <div class="metric-bar">
+                <div class="metric-bar-fill" id="positions-bar" style="width: 0%"></div>
+              </div>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Max / Trade</span>
+              <span class="metric-value" id="max-trade-value">$50</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Volume / Airdrop Panel -->
+        <div class="card volume-card">
+          <div class="card-header">
+            <h2>🪂 Airdrop Farming</h2>
+          </div>
+          <div class="volume-stats">
+            <div class="volume-stat">
+              <span class="volume-platform">Polymarket</span>
+              <span class="volume-amount" id="pm-volume">$0</span>
+              <span class="volume-trades" id="pm-trades">0 trades</span>
+            </div>
+            <div class="volume-stat">
+              <span class="volume-platform">Kalshi</span>
+              <span class="volume-amount" id="k-volume">$0</span>
+              <span class="volume-trades" id="k-trades">0 trades</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Trade History -->
+        <div class="card history-card">
+          <div class="card-header">
+            <h2>📋 Trade History</h2>
+            <span class="badge" id="history-count">0</span>
+          </div>
+          <div class="history-list" id="history-list">
+            <div class="empty-state">No trades yet</div>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <!-- Trade Confirmation Modal -->
+    <div class="modal-overlay" id="trade-modal" style="display: none">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Confirm Trade</h3>
+          <button class="modal-close" id="modal-close">&times;</button>
+        </div>
+        <div class="modal-body" id="modal-body">
+          <!-- Filled dynamically -->
+        </div>
+        <div class="modal-footer">
+          <input type="number" class="size-input" id="trade-size-input" placeholder="Size ($)" />
+          <button class="btn btn-cancel" id="modal-cancel">Cancel</button>
+          <button class="btn btn-execute" id="modal-execute">⚡ Execute</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/static/main.js?v=2"></script>
+</body>
+
+</html>
