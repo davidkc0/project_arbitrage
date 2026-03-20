@@ -18,12 +18,14 @@ from weather_bets.executor import WeatherExecutor
 from weather_bets.historical import fetch_historical_temps, analyze_forecast_bias
 from weather_bets.kalshi_weather import fetch_weather_markets
 from weather_bets.llm_analyst import analyze_spread
-from weather_bets.models import BetDecision, ForecastData
+from weather_bets.models import BetDecision, BetRecommendation, EdgeOpportunity, ForecastData
 from weather_bets.nws_forecast import fetch_forecast, fetch_hourly_forecast
 from weather_bets.open_meteo import fetch_multi_model_forecast, build_consensus
+from weather_bets.price_watcher import PriceWatcher
+from weather_bets.position_manager import PositionManager
 from weather_bets.trade_log import (
     load_trades, save_trade, save_scan_result, get_trade_summary,
-    get_open_tickers,
+    get_open_tickers, already_bet_on,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,6 +48,8 @@ scan_state = {
 }
 
 executor = WeatherExecutor()
+position_manager = PositionManager()
+price_watcher: PriceWatcher | None = None  # initialized in lifespan
 
 
 async def run_scan_cycle():
@@ -305,11 +309,148 @@ async def run_scan_cycle():
     scan_state["trade_summary"] = get_trade_summary()
 
 
+# ── Momentum signal handler ─────────────────────────────────────────────
+
+async def handle_momentum_signal(ticker: str, signal: str) -> None:
+    """
+    React immediately to a price momentum signal from PriceWatcher.
+
+    buy  → evaluate and place bet if we don't already hold it (50% budget rule applies)
+    sell → close the position via PositionManager
+    """
+    if signal == "sell":
+        logger.info(f"[Momentum] SELL signal for {ticker} — attempting to close position")
+        result = await position_manager.sell_position(ticker, reason="momentum take-profit")
+        logger.info(f"[Momentum] Sell result: {result}")
+        if price_watcher:
+            price_watcher.clear_signal(ticker)
+        return
+
+    if signal == "buy":
+        if already_bet_on(ticker):
+            logger.info(f"[Momentum] BUY signal for {ticker} — already holding, skipping")
+            if price_watcher:
+                price_watcher.clear_signal(ticker)
+            return
+
+        # Find the opportunity data from latest scan state
+        opportunities = scan_state.get("opportunities", [])
+        opp_data = next((o for o in opportunities if o.get("ticker") == ticker), None)
+        if not opp_data:
+            logger.info(f"[Momentum] BUY signal for {ticker} — no opportunity data from scan, skipping")
+            if price_watcher:
+                price_watcher.clear_signal(ticker)
+            return
+
+        # Respect budget rule
+        remaining = await executor.get_betting_budget()
+        if remaining <= 0:
+            logger.warning(f"[Momentum] BUY signal for {ticker} — 50% budget exhausted, skipping")
+            if price_watcher:
+                price_watcher.clear_signal(ticker)
+            return
+
+        bet_size = min(config.BET_SIZE_USD, remaining)
+        logger.info(
+            f"[Momentum] BUY signal for {ticker} — our_prob={opp_data.get('our_prob')}% "
+            f"market={opp_data.get('market_prob')}% "
+            f"edge={opp_data.get('edge')}% — placing bet of ${bet_size:.2f}"
+        )
+
+        # Build a minimal BetRecommendation
+        from weather_bets.models import TemperatureBucket
+        bucket = TemperatureBucket(
+            ticker=ticker,
+            label=opp_data.get("bucket", "?"),
+            low_bound=None,
+            high_bound=None,
+            yes_price=opp_data.get("yes_price", 0.5),
+            no_price=1.0 - opp_data.get("yes_price", 0.5),
+            volume=0,
+            close_time="",
+        )
+        opp = EdgeOpportunity(
+            city=opp_data.get("city", "AUS"),
+            date=opp_data.get("date", ""),
+            bucket=bucket,
+            forecast_high=opp_data.get("forecast", 0),
+            our_probability=opp_data.get("our_prob", 50) / 100.0,
+            market_probability=opp_data.get("market_prob", 50) / 100.0,
+            edge=opp_data.get("edge", 0) / 100.0,
+            edge_percent=opp_data.get("edge", 0),
+            expected_value=0,
+            forecast_detail="momentum buy",
+        )
+        rec = BetRecommendation(
+            decision=BetDecision.BET,
+            opportunity=opp,
+            confidence=0.65,
+            bet_size_usd=bet_size,
+            reasoning=f"Momentum buy: price dropped >15% over 3 readings, consensus still bullish",
+            side="yes",
+            ticker=ticker,
+        )
+
+        bet = await executor.place_bet(rec)
+        trade_record = {
+            "id": bet.id,
+            "ticker": bet.ticker,
+            "city": bet.city,
+            "date": bet.date,
+            "bucket": bet.bucket_label,
+            "side": bet.side,
+            "price": bet.price,
+            "qty": bet.quantity,
+            "cost": round(bet.cost_usd, 2),
+            "edge": round(bet.edge_percent, 1),
+            "our_prob": round(bet.our_probability * 100, 1),
+            "market_prob": round(bet.market_probability * 100, 1),
+            "spread": "momentum",
+            "reasoning": rec.reasoning,
+            "mode": config.EXECUTION_MODE,
+            "time": bet.placed_at.isoformat(),
+            "settled": False,
+            "won": None,
+            "pnl": None,
+        }
+        save_trade(trade_record)
+        scan_state["placed_bets"].append(trade_record)
+        scan_state["trade_summary"] = get_trade_summary()
+
+        if price_watcher:
+            price_watcher.clear_signal(ticker)
+
+
+# ── Momentum watcher loop ───────────────────────────────────────────────
+
+async def momentum_loop() -> None:
+    """
+    Polls PriceWatcher state and fires handle_momentum_signal() on new signals.
+    Runs every 10s — lightweight since PriceWatcher does the heavy polling.
+    """
+    seen_signals: dict[str, str] = {}  # ticker -> last signal we acted on
+    while True:
+        await asyncio.sleep(10)
+        if price_watcher is None:
+            continue
+        try:
+            state = price_watcher.get_state()
+            for ticker, signal in state.get("signals", {}).items():
+                if signal and seen_signals.get(ticker) != signal:
+                    seen_signals[ticker] = signal
+                    asyncio.create_task(handle_momentum_signal(ticker, signal))
+        except Exception as e:
+            logger.error(f"[MomentumLoop] Error: {e}", exc_info=True)
+
+
 # ── Scan Loop ───────────────────────────────────────────────────────────
 
 async def scan_loop():
+    global price_watcher
     await asyncio.sleep(2)
     await executor.initialize()
+    await position_manager.initialize()
+    price_watcher = PriceWatcher(scan_state)
     while True:
         try:
             await run_scan_cycle()
@@ -323,10 +464,26 @@ async def scan_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    task = asyncio.create_task(scan_loop())
+    async def _price_watch_delayed():
+        """Wait until price_watcher is initialized by scan_loop, then start it."""
+        for _ in range(60):  # wait up to 60s
+            await asyncio.sleep(1)
+            if price_watcher is not None:
+                break
+        if price_watcher is not None:
+            await price_watcher.start()
+        else:
+            logger.warning("[Lifespan] price_watcher never initialized")
+
+    scan_task = asyncio.create_task(scan_loop())
+    price_watch_task = asyncio.create_task(_price_watch_delayed())
+    momentum_task = asyncio.create_task(momentum_loop())
     yield
-    task.cancel()
+    scan_task.cancel()
+    price_watch_task.cancel()
+    momentum_task.cancel()
     await executor.close()
+    await position_manager.close()
 
 app = FastAPI(title="Weather Bets", lifespan=lifespan)
 DASHBOARD_DIR = Path(__file__).parent / "dashboard"
@@ -338,6 +495,18 @@ async def index():
 @app.get("/api/state")
 async def get_state():
     return scan_state
+
+@app.get("/api/prices")
+async def get_prices():
+    """Expose PriceWatcher state: price history, signals, momentum."""
+    if price_watcher is None:
+        return {"status": "not_started", "tickers": {}, "signals": {}}
+    return price_watcher.get_state()
+
+@app.get("/api/positions")
+async def get_positions():
+    """Fetch open Kalshi portfolio positions."""
+    return await position_manager.get_open_positions()
 
 @app.get("/api/rescan")
 async def trigger_rescan():

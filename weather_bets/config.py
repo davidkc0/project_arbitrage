@@ -22,6 +22,7 @@ KALSHI_BASE_URL: str = "https://api.elections.kalshi.com/trade-api/v2"
 BET_SIZE_USD: float = float(os.getenv("WEATHER_BET_SIZE", "10"))
 MIN_EDGE: float = float(os.getenv("WEATHER_MIN_EDGE", "0.10"))  # 10%
 SCAN_INTERVAL: int = int(os.getenv("WEATHER_SCAN_INTERVAL", "1800"))  # 30 min
+PRICE_WATCH_INTERVAL: int = int(os.getenv("WEATHER_PRICE_WATCH_INTERVAL", "120"))  # 2 min
 EXECUTION_MODE: str = os.getenv("WEATHER_EXECUTION_MODE", "dry")  # "dry" or "live"
 
 # ── NWS Forecast Settings ───────────────────────────────────────────────

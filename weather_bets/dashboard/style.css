@@ -357,3 +357,120 @@ h1 {
     overflow-x: auto;
 }
 
+
+/* Price Monitor */
+.price-monitor-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding: 8px 12px;
+    background: #0f172a;
+    border-radius: 8px;
+    border: 1px solid #1e293b;
+}
+
+.price-monitor-status {
+    font-weight: 600;
+    font-size: 0.9em;
+}
+
+.price-monitor-poll {
+    color: #475569;
+    font-size: 0.8em;
+}
+
+.price-monitor-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 12px;
+}
+
+.price-card {
+    background: #111827;
+    border: 1px solid #1e293b;
+    border-radius: 10px;
+    padding: 12px 14px;
+    transition: border-color 0.3s;
+}
+
+.price-card-signal-buy {
+    border-color: #10b981;
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.15);
+}
+
+.price-card-signal-sell {
+    border-color: #ef4444;
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.15);
+}
+
+.price-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.price-ticker {
+    font-size: 0.8em;
+    font-weight: 600;
+    color: #94a3b8;
+    font-family: monospace;
+}
+
+.price-card-body {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.price-current {
+    font-size: 1.4em;
+    font-weight: 700;
+}
+
+.price-sparkline svg {
+    display: block;
+}
+
+.price-history {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    border-top: 1px solid #1e293b;
+    padding-top: 8px;
+}
+
+.price-history-item {
+    font-size: 0.78em;
+    color: #94a3b8;
+    background: #0f172a;
+    border-radius: 4px;
+    padding: 2px 5px;
+}
+
+.signal-badge {
+    font-size: 0.75em;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+
+.signal-buy {
+    background: rgba(16, 185, 129, 0.2);
+    color: #10b981;
+}
+
+.signal-sell {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+}
+
+.position-badge {
+    font-size: 0.75em;
+    color: #f59e0b;
+    background: rgba(245, 158, 11, 0.1);
+    padding: 2px 6px;
+    border-radius: 4px;
+}

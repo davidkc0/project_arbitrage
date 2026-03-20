@@ -1,5 +1,6 @@
 // Weather Bets Dashboard — spread betting UI
 const API_URL = '/api/state';
+const PRICES_URL = '/api/prices';
 const REFRESH_MS = 5000;
 
 async function fetchState() {
@@ -8,6 +9,16 @@ async function fetchState() {
         return await resp.json();
     } catch (e) {
         console.error('Fetch error:', e);
+        return null;
+    }
+}
+
+async function fetchPrices() {
+    try {
+        const resp = await fetch(PRICES_URL);
+        return await resp.json();
+    } catch (e) {
+        console.error('Prices fetch error:', e);
         return null;
     }
 }
@@ -168,6 +179,100 @@ function renderBets(bets) {
     `).join('');
 }
 
+function renderPriceMonitor(priceState) {
+    const grid = document.getElementById('price-monitor-grid');
+    const status = document.getElementById('price-monitor-status');
+    const pollEl = document.getElementById('price-monitor-poll');
+
+    if (!priceState || priceState.status === 'not_started') {
+        grid.innerHTML = '<div class="empty-state">Price watcher not started yet...</div>';
+        status.textContent = '⏳ Starting...';
+        return;
+    }
+
+    const tickers = priceState.tickers || {};
+    const signals = priceState.signals || {};
+    const pollCount = priceState.poll_count || 0;
+    const lastUpdate = priceState.last_update;
+
+    // Status bar
+    const activeSignals = Object.keys(signals).length;
+    status.textContent = `${Object.keys(tickers).length} tickers watched · ${activeSignals} active signal${activeSignals !== 1 ? 's' : ''}`;
+    status.style.color = activeSignals > 0 ? '#f59e0b' : '#10b981';
+
+    if (lastUpdate) {
+        const d = new Date(lastUpdate.endsWith('Z') ? lastUpdate : lastUpdate + 'Z');
+        pollEl.textContent = `Last poll: ${d.toLocaleTimeString()} · Poll #${pollCount}`;
+    }
+
+    if (!Object.keys(tickers).length) {
+        grid.innerHTML = '<div class="empty-state">No tickers tracked yet...</div>';
+        return;
+    }
+
+    // Sort: signals first, then by ticker name
+    const sorted = Object.values(tickers).sort((a, b) => {
+        if (a.signal && !b.signal) return -1;
+        if (!a.signal && b.signal) return 1;
+        return a.ticker.localeCompare(b.ticker);
+    });
+
+    grid.innerHTML = sorted.map(t => {
+        const hist = t.history || [];
+        const prices = hist.map(h => h.price);
+        const current = t.current_price != null ? (t.current_price * 100).toFixed(0) + '¢' : '—';
+        const dirIcon = t.direction === 'up' ? '📈' : t.direction === 'down' ? '📉' : '➡️';
+        const dirColor = t.direction === 'up' ? '#10b981' : t.direction === 'down' ? '#ef4444' : '#94a3b8';
+        const signalBadge = t.signal
+            ? `<span class="signal-badge signal-${t.signal}">${t.signal === 'buy' ? '🟢 BUY' : '🔴 SELL'}</span>`
+            : '';
+        const positionBadge = t.in_open_positions
+            ? '<span class="position-badge">📌 OPEN</span>'
+            : '';
+
+        // Mini sparkline from price history
+        const sparkline = _renderSparkline(prices);
+
+        // Price history list (last 5)
+        const histHtml = hist.slice(-5).map(h =>
+            `<span class="price-history-item">${(h.price * 100).toFixed(0)}¢ <span style="color:#64748b;font-size:0.75em">${h.time}</span></span>`
+        ).join('');
+
+        return `
+        <div class="price-card ${t.signal ? 'price-card-signal-' + t.signal : ''}">
+            <div class="price-card-header">
+                <div class="price-ticker">${t.ticker.split('-').slice(-2).join('-')}</div>
+                <div style="display:flex;gap:6px;align-items:center">
+                    ${positionBadge}
+                    ${signalBadge}
+                </div>
+            </div>
+            <div class="price-card-body">
+                <div class="price-current" style="color:${dirColor}">${dirIcon} ${current}</div>
+                <div class="price-sparkline">${sparkline}</div>
+            </div>
+            <div class="price-history">${histHtml || '<span style="color:#64748b">No history yet</span>'}</div>
+        </div>`;
+    }).join('');
+}
+
+function _renderSparkline(prices) {
+    if (!prices || prices.length < 2) return '';
+    const w = 80, h = 28;
+    const min = Math.min(...prices);
+    const max = Math.max(...prices);
+    const range = max - min || 0.01;
+    const pts = prices.map((p, i) => {
+        const x = (i / (prices.length - 1)) * w;
+        const y = h - ((p - min) / range) * (h - 2) - 1;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    const color = prices[prices.length - 1] >= prices[0] ? '#10b981' : '#ef4444';
+    return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="overflow:visible">
+        <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>
+    </svg>`;
+}
+
 function renderScanLog(log) {
     const el = document.getElementById('scan-log');
     if (!log || !log.length) {
@@ -179,7 +284,7 @@ function renderScanLog(log) {
 }
 
 async function update() {
-    const state = await fetchState();
+    const [state, priceState] = await Promise.all([fetchState(), fetchPrices()]);
     if (!state) return;
 
     const lastScan = document.getElementById('last-scan');
@@ -195,6 +300,7 @@ async function update() {
     renderRecommendations(state.recommendations);
     renderBets(state.placed_bets);
     renderScanLog(state.scan_log);
+    renderPriceMonitor(priceState);
 }
 
 document.getElementById('rescan-btn').addEventListener('click', async () => {
