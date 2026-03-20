@@ -95,7 +95,7 @@ function renderOpportunities() {
   if (opps.length === 0) {
     tbody.innerHTML = `
       <tr class="empty-row">
-        <td colspan="8">
+        <td colspan="10">
           ${state.scanner ? 'No arbitrage opportunities found yet — scanning...' : 'Connecting to scanner...'}
         </td>
       </tr>
@@ -122,6 +122,22 @@ function renderOpportunities() {
     const noGreenPM = pmNo < kNo ? 'color: var(--green); font-weight:600' : '';
     const noGreenK = kNo < pmNo ? 'color: var(--green); font-weight:600' : '';
 
+    // Human-readable expiry
+    const days = opp.days_to_expiry || 365;
+    let expiresLabel;
+    if (days <= 1) expiresLabel = '<1d';
+    else if (days <= 30) expiresLabel = `${Math.round(days)}d`;
+    else if (days <= 365) expiresLabel = `${(days / 30).toFixed(1)}mo`;
+    else expiresLabel = `${(days / 365).toFixed(1)}yr`;
+
+    // Expiry urgency color
+    const expiresStyle = days <= 14 ? 'color: var(--green); font-weight:600'
+      : days <= 90 ? 'color: var(--text-secondary)' : 'color: var(--text-muted)';
+
+    const annEdge = (opp.annualized_edge || 0).toFixed(1);
+    const annEdgeStyle = opp.annualized_edge > 20 ? 'color: var(--green); font-weight:600'
+      : opp.annualized_edge > 5 ? 'color: var(--text-secondary)' : 'color: var(--text-muted)';
+
     return `
       <tr data-opp-id="${opp.id}">
         <td>
@@ -132,6 +148,8 @@ function renderOpportunities() {
         <td class="price-cell" style="${noGreenPM}">$${pmNo.toFixed(3)}</td>
         <td class="price-cell" style="${noGreenK}">$${kNo.toFixed(3)}</td>
         <td class="edge-cell ${edgeClass}">${opp.net_edge_percent.toFixed(2)}%</td>
+        <td style="${expiresStyle}">${expiresLabel}</td>
+        <td style="${annEdgeStyle}">${annEdge}%</td>
         <td>
           <span class="confidence-bar">
             <span class="confidence-bar-fill ${confClass}" style="width: ${opp.match_confidence}%"></span>

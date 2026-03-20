@@ -74,7 +74,7 @@ class PolymarketScanner(BaseScanner):
         try:
             # ── Step 1: Discover markets via Gamma API (paginated) ──────
             raw_markets = []
-            pages = 5  # 5 pages × 100 = up to 500 markets
+            pages = 20  # 20 pages × 100 = up to 2000 markets
             for page in range(pages):
                 params = {
                     "active": "true",

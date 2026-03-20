@@ -101,6 +101,10 @@ class ArbitrageOpportunity(BaseModel):
     available_depth_a: float = 0.0
     available_depth_b: float = 0.0
 
+    # Time-value ranking
+    days_to_expiry: float = 365.0   # Days until market resolves
+    annualized_edge: float = 0.0    # net_edge_percent * (365 / days_to_expiry)
+
     discovered_at: datetime = Field(default_factory=datetime.utcnow)
     is_stale: bool = False
 

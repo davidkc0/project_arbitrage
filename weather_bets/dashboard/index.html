@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weather Bets — Kalshi Temperature Trading</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-left">
+                <h1>🌡️ Weather Bets</h1>
+                <span class="subtitle">Kalshi Temperature Spread Trading</span>
+            </div>
+            <div class="header-right">
+                <span class="mode-badge" id="mode-badge">DRY RUN</span>
+                <button class="btn btn-rescan" id="rescan-btn">🔄 Rescan</button>
+                <span class="last-scan" id="last-scan">—</span>
+            </div>
+        </header>
+
+        <!-- Forecast + Historical -->
+        <section class="section">
+            <h2>📡 NWS Forecast</h2>
+            <div class="forecast-cards" id="forecast-cards">
+                <div class="empty-state">Waiting for first scan...</div>
+            </div>
+            <div class="bias-bar" id="bias-bar"></div>
+        </section>
+
+        <!-- Recent Actuals -->
+        <section class="section" id="historical-section" style="display:none">
+            <h2>📊 Recent Actuals (Bergstrom Airport)</h2>
+            <div class="historical-cards" id="historical-cards"></div>
+        </section>
+
+        <!-- Market Buckets -->
+        <section class="section">
+            <h2>📈 Kalshi Markets vs Our Model</h2>
+            <div class="buckets-grid" id="buckets-grid">
+                <div class="empty-state">No market data yet</div>
+            </div>
+        </section>
+
+        <!-- Spread Builder -->
+        <section class="section">
+            <h2>🎯 Spread Options</h2>
+            <table class="data-table" id="spreads-table">
+                <thead>
+                    <tr>
+                        <th>Spread</th>
+                        <th>Forecast</th>
+                        <th>Combined Prob</th>
+                        <th>Cost</th>
+                        <th>Profit if Hit</th>
+                        <th>Expected Value</th>
+                        <th>ROI</th>
+                    </tr>
+                </thead>
+                <tbody id="spreads-body">
+                    <tr><td colspan="7" class="empty-state">No spreads calculated yet</td></tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- LLM Recommendations -->
+        <section class="section">
+            <h2>🤖 Claude's Analysis</h2>
+            <div class="recommendations" id="recommendations">
+                <div class="empty-state">Waiting for LLM analysis...</div>
+            </div>
+        </section>
+
+        <!-- Placed Bets -->
+        <section class="section">
+            <h2>💰 Placed Bets</h2>
+            <table class="data-table" id="bets-table">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Ticker</th>
+                        <th>Bucket</th>
+                        <th>Side</th>
+                        <th>Price</th>
+                        <th>Qty</th>
+                        <th>Cost</th>
+                        <th>Spread</th>
+                    </tr>
+                </thead>
+                <tbody id="bets-body">
+                    <tr><td colspan="8" class="empty-state">No bets placed</td></tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- Scan Log -->
+        <section class="section">
+            <h2>📋 Scan Log</h2>
+            <pre class="scan-log" id="scan-log">Waiting for first scan...</pre>
+        </section>
+    </div>
+
+    <script src="main.js"></script>
+</body>
+</html>

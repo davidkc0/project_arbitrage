@@ -1,0 +1,359 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: #0a0e17;
+    color: #e0e6ed;
+    line-height: 1.6;
+    padding: 24px;
+}
+
+.container {
+    max-width: 1100px;
+    margin: 0 auto;
+}
+
+/* Header */
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px;
+    background: linear-gradient(135deg, #111827, #1a2332);
+    border: 1px solid #1e293b;
+    border-radius: 16px;
+    margin-bottom: 24px;
+}
+
+h1 {
+    font-size: 1.8em;
+    font-weight: 700;
+    background: linear-gradient(135deg, #f97316, #ef4444);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.subtitle {
+    color: #64748b;
+    font-size: 0.85em;
+    margin-left: 8px;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.mode-badge {
+    background: rgba(245, 158, 11, 0.15);
+    color: #f59e0b;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 0.75em;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.mode-badge.live {
+    background: rgba(16, 185, 129, 0.15);
+    color: #10b981;
+    border-color: rgba(16, 185, 129, 0.3);
+}
+
+.btn {
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: 1px solid #374151;
+    background: #1f2937;
+    color: #e0e6ed;
+    cursor: pointer;
+    font-size: 0.85em;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.btn:hover {
+    background: #374151;
+    transform: translateY(-1px);
+}
+
+.last-scan {
+    color: #64748b;
+    font-size: 0.8em;
+}
+
+/* Sections */
+.section {
+    background: #111827;
+    border: 1px solid #1e293b;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.section h2 {
+    font-size: 1.1em;
+    font-weight: 600;
+    margin-bottom: 16px;
+    color: #94a3b8;
+}
+
+.empty-state {
+    color: #475569;
+    text-align: center;
+    padding: 20px;
+    font-style: italic;
+}
+
+/* Forecast Cards */
+.forecast-cards {
+    display: flex;
+    gap: 12px;
+    overflow-x: auto;
+}
+
+.forecast-card {
+    min-width: 180px;
+    background: #1a2332;
+    border: 1px solid #1e293b;
+    border-radius: 12px;
+    padding: 16px;
+    text-align: center;
+    transition: transform 0.2s;
+}
+
+.forecast-card:hover {
+    transform: translateY(-2px);
+}
+
+.forecast-card .date {
+    color: #64748b;
+    font-size: 0.8em;
+    margin-bottom: 6px;
+}
+
+.forecast-card .temp {
+    font-size: 2.2em;
+    font-weight: 700;
+    background: linear-gradient(135deg, #f97316, #ef4444);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.forecast-card .condition {
+    color: #94a3b8;
+    font-size: 0.85em;
+    margin-top: 4px;
+}
+
+/* Buckets Grid */
+.buckets-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.bucket-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: #1a2332;
+    border-radius: 8px;
+    border: 1px solid #1e293b;
+}
+
+.bucket-row.has-edge {
+    border-color: rgba(16, 185, 129, 0.4);
+    background: rgba(16, 185, 129, 0.05);
+}
+
+.bucket-label {
+    width: 90px;
+    font-weight: 600;
+    font-size: 0.9em;
+}
+
+.bucket-bar-container {
+    flex: 1;
+    height: 28px;
+    background: #0f1724;
+    border-radius: 6px;
+    position: relative;
+    overflow: hidden;
+}
+
+.bucket-bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    border-radius: 6px;
+    transition: width 0.5s ease;
+}
+
+.bucket-bar.market {
+    background: rgba(59, 130, 246, 0.4);
+    z-index: 1;
+}
+
+.bucket-bar.model {
+    background: rgba(16, 185, 129, 0.5);
+    z-index: 2;
+    border-right: 2px solid #10b981;
+}
+
+.bucket-prices {
+    width: 140px;
+    text-align: right;
+    font-size: 0.85em;
+}
+
+.bucket-prices .market-price {
+    color: #3b82f6;
+}
+
+.bucket-prices .model-price {
+    color: #10b981;
+}
+
+.bucket-edge {
+    width: 70px;
+    text-align: right;
+    font-weight: 600;
+    font-size: 0.85em;
+}
+
+.edge-positive { color: #10b981; }
+.edge-negative { color: #64748b; }
+
+/* Data Tables */
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85em;
+}
+
+.data-table th {
+    text-align: left;
+    padding: 10px 12px;
+    color: #64748b;
+    font-weight: 500;
+    border-bottom: 1px solid #1e293b;
+    font-size: 0.9em;
+}
+
+.data-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #141c2b;
+}
+
+.data-table tbody tr:hover {
+    background: rgba(59, 130, 246, 0.05);
+}
+
+/* Recommendations */
+.recommendations {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.rec-card {
+    padding: 16px;
+    border-radius: 10px;
+    border: 1px solid #1e293b;
+}
+
+.rec-card.bet {
+    background: rgba(16, 185, 129, 0.08);
+    border-color: rgba(16, 185, 129, 0.3);
+}
+
+.rec-card.skip {
+    background: rgba(245, 158, 11, 0.08);
+    border-color: rgba(245, 158, 11, 0.3);
+}
+
+.rec-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.rec-decision {
+    font-weight: 700;
+    font-size: 1em;
+}
+
+.rec-decision.bet { color: #10b981; }
+.rec-decision.skip { color: #f59e0b; }
+
+.rec-meta {
+    color: #64748b;
+    font-size: 0.8em;
+}
+
+.rec-reasoning {
+    color: #94a3b8;
+    font-size: 0.9em;
+    line-height: 1.5;
+}
+
+/* Scan Log */
+.scan-log {
+    background: #0f1724;
+    border: 1px solid #1e293b;
+    border-radius: 8px;
+    padding: 16px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.8em;
+    max-height: 400px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    color: #94a3b8;
+    line-height: 1.7;
+}
+
+/* Bias Bar */
+.bias-bar {
+    margin-top: 12px;
+    padding: 8px 14px;
+    font-size: 0.85em;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.bias-label {
+    color: #64748b;
+    font-weight: 500;
+}
+
+.bias-value {
+    font-weight: 700;
+    font-size: 1em;
+}
+
+.bias-value.hot { color: #ef4444; }
+.bias-value.cold { color: #3b82f6; }
+
+.bias-detail {
+    color: #475569;
+    font-size: 0.85em;
+}
+
+/* Historical Cards */
+.historical-cards {
+    display: flex;
+    gap: 12px;
+    overflow-x: auto;
+}
+

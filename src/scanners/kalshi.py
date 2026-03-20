@@ -169,15 +169,41 @@ class KalshiScanner(BaseScanner):
                         if not question:
                             continue
 
-                        # Pricing (Kalshi uses cents: 0-100)
-                        yes_bid = (market.get("yes_bid") or 0) / 100.0
-                        yes_ask = (market.get("yes_ask") or 0) / 100.0
-                        no_bid = (market.get("no_bid") or 0) / 100.0
-                        no_ask = (market.get("no_ask") or 0) / 100.0
+                        # Pricing — Kalshi now uses _dollars fields (already in dollars, e.g., 0.09 = 9¢)
+                        # Fall back to old cents-based fields if _dollars aren't present
+                        yes_bid = market.get("yes_bid_dollars")
+                        if yes_bid is None:
+                            yes_bid = (market.get("yes_bid") or 0) / 100.0
+                        else:
+                            yes_bid = float(yes_bid)
 
-                        last_price = market.get("last_price", 0)
-                        if last_price:
-                            last_price = last_price / 100.0
+                        yes_ask = market.get("yes_ask_dollars")
+                        if yes_ask is None:
+                            yes_ask = (market.get("yes_ask") or 0) / 100.0
+                        else:
+                            yes_ask = float(yes_ask)
+
+                        no_bid = market.get("no_bid_dollars")
+                        if no_bid is None:
+                            no_bid = (market.get("no_bid") or 0) / 100.0
+                        else:
+                            no_bid = float(no_bid)
+
+                        no_ask = market.get("no_ask_dollars")
+                        if no_ask is None:
+                            no_ask = (market.get("no_ask") or 0) / 100.0
+                        else:
+                            no_ask = float(no_ask)
+
+                        # Skip illiquid markets with no orderbook
+                        if yes_ask <= 0 and no_ask <= 0:
+                            continue
+
+                        last_price = market.get("last_price_dollars")
+                        if last_price is None:
+                            last_price = (market.get("last_price") or 0) / 100.0
+                        else:
+                            last_price = float(last_price)
 
                         volume = float(market.get("volume", 0))
 
@@ -228,6 +254,128 @@ class KalshiScanner(BaseScanner):
                 cursor = data.get("cursor")
                 if not cursor:
                     break
+
+            # ── Fetch sports game series that don't appear in default listing ──
+            game_series_tickers = [
+                "KXNCAAMBGAME",   # NCAA Men's Basketball games
+                "KXNBAGAME",      # NBA games
+                "KXMLBGAME",      # MLB games
+                "KXNHLGAME",      # NHL games
+                "KXSOCCERGAME",   # Soccer matches
+                "KXNCAAWBGAME",   # NCAA Women's Basketball
+                "KXNCAAFBGAME",   # NCAA Football games
+                "KXNFLGAME",      # NFL games
+            ]
+            game_market_count = 0
+            for series_ticker in game_series_tickers:
+                try:
+                    series_cursor: str | None = None
+                    for _ in range(5):  # Up to 500 game events per series
+                        params: dict = {
+                            "limit": 100,
+                            "status": "open",
+                            "with_nested_markets": "true",
+                            "series_ticker": series_ticker,
+                        }
+                        if series_cursor:
+                            params["cursor"] = series_cursor
+
+                        resp = await self._http.get(
+                            "/events", params=params,
+                        )
+                        resp.raise_for_status()
+                        data = resp.json()
+                        event_list = data.get("events", [])
+                        if not event_list:
+                            break
+
+                        for event in event_list:
+                            for market in event.get("markets", []):
+                                ticker = market.get("ticker", "")
+                                if ticker in seen_tickers:
+                                    continue
+                                # Skip multi-outcome parlays
+                                if "KXMVE" in ticker:
+                                    continue
+                                seen_tickers.add(ticker)
+
+                                question = market.get("title") or event.get("title", "")
+                                if not question:
+                                    continue
+
+                                # Pricing
+                                yes_bid = market.get("yes_bid_dollars")
+                                if yes_bid is None:
+                                    yes_bid = (market.get("yes_bid") or 0) / 100.0
+                                else:
+                                    yes_bid = float(yes_bid)
+
+                                yes_ask = market.get("yes_ask_dollars")
+                                if yes_ask is None:
+                                    yes_ask = (market.get("yes_ask") or 0) / 100.0
+                                else:
+                                    yes_ask = float(yes_ask)
+
+                                no_bid = market.get("no_bid_dollars")
+                                if no_bid is None:
+                                    no_bid = (market.get("no_bid") or 0) / 100.0
+                                else:
+                                    no_bid = float(no_bid)
+
+                                no_ask = market.get("no_ask_dollars")
+                                if no_ask is None:
+                                    no_ask = (market.get("no_ask") or 0) / 100.0
+                                else:
+                                    no_ask = float(no_ask)
+
+                                if yes_ask <= 0 and no_ask <= 0:
+                                    continue
+
+                                last_price = market.get("last_price_dollars")
+                                if last_price is None:
+                                    last_price = (market.get("last_price") or 0) / 100.0
+                                else:
+                                    last_price = float(last_price)
+
+                                volume = float(market.get("volume", 0))
+
+                                end_date_str = market.get("close_time") or market.get("expiration_time", "")
+                                end_date = None
+                                if end_date_str:
+                                    try:
+                                        end_date = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
+                                    except (ValueError, TypeError):
+                                        pass
+
+                                outcomes = [
+                                    OutcomePrice(side=OutcomeSide.YES, best_bid=yes_bid, best_ask=yes_ask, last_price=last_price),
+                                    OutcomePrice(side=OutcomeSide.NO, best_bid=no_bid, best_ask=no_ask, last_price=1.0 - last_price if last_price else 0.0),
+                                ]
+
+                                url = f"https://kalshi.com/markets/{series_ticker.lower()}/{ticker.lower()}"
+                                me = MarketEvent(
+                                    platform=Platform.KALSHI,
+                                    platform_id=ticker,
+                                    question=question,
+                                    outcomes=outcomes,
+                                    volume=volume,
+                                    end_date=end_date,
+                                    url=url,
+                                    ticker=ticker,
+                                )
+                                events.append(me)
+                                game_market_count += 1
+
+                        series_cursor = data.get("cursor")
+                        if not series_cursor:
+                            break
+                except httpx.HTTPStatusError as e:
+                    logger.debug(f"[Kalshi] Game series {series_ticker}: HTTP {e.response.status_code}")
+                except Exception as e:
+                    logger.debug(f"[Kalshi] Game series {series_ticker}: {e}")
+
+            if game_market_count > 0:
+                logger.info(f"[Kalshi] Fetched {game_market_count} additional game markets from sports series")
 
         except httpx.HTTPStatusError as e:
             logger.error(f"[Kalshi] HTTP error: {e.response.status_code}")

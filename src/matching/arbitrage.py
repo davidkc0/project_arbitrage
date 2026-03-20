@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from src.config import settings
 from src.models import (
@@ -51,17 +51,23 @@ def calculate_edge(
     Strategy: Buy YES on one platform + NO on the other.
     Try both directions and pick the one with the higher edge.
     """
-    # ── Direction 1: YES on A, NO on B ──────────────────────────────────
+    # Get all four prices
     yes_a = _get_price(event_a, OutcomeSide.YES, use_ask=True)
+    no_a = _get_price(event_a, OutcomeSide.NO, use_ask=True)
+    yes_b = _get_price(event_b, OutcomeSide.YES, use_ask=True)
     no_b = _get_price(event_b, OutcomeSide.NO, use_ask=True)
+
+    # ── Guard: skip if ANY price is zero (illiquid / no data) ───────────
+    if yes_a <= 0 or no_a <= 0 or yes_b <= 0 or no_b <= 0:
+        return None
+
+    # ── Direction 1: YES on A, NO on B ──────────────────────────────────
     cost_1 = yes_a + no_b
-    edge_1 = 1.0 - cost_1 if cost_1 > 0 else -999
+    edge_1 = 1.0 - cost_1
 
     # ── Direction 2: YES on B, NO on A ──────────────────────────────────
-    yes_b = _get_price(event_b, OutcomeSide.YES, use_ask=True)
-    no_a = _get_price(event_a, OutcomeSide.NO, use_ask=True)
     cost_2 = yes_b + no_a
-    edge_2 = 1.0 - cost_2 if cost_2 > 0 else -999
+    edge_2 = 1.0 - cost_2
 
     # Pick the better direction
     if edge_1 >= edge_2 and edge_1 > 0:
@@ -114,8 +120,25 @@ def calculate_edge(
     net_edge = gross_edge - fee_estimate
     net_edge_percent = (net_edge / total_cost * 100) if total_cost > 0 else 0.0
 
+    # Sanity cap: real prediction market arb is typically 1-10%.
+    # Anything above 50% is almost certainly bad data (zero prices,
+    # stale orderbooks, wrong market matched).
+    if net_edge_percent > 50:
+        return None
+
     # Max bet size limited by the shallower book
     max_bet = min(depth_a, depth_b) if depth_a > 0 and depth_b > 0 else 0.0
+
+    # ── Time-value: days until the earlier expiry ────────────────────────
+    now = datetime.now(timezone.utc)
+    end_dates = [d for d in [event_a.end_date, event_b.end_date] if d]
+    if end_dates:
+        earliest = min(end_dates)
+        days_to_expiry = max((earliest - now).total_seconds() / 86400, 1)
+    else:
+        days_to_expiry = 365.0  # Unknown → assume 1 year
+
+    annualized_edge = net_edge_percent * (365.0 / days_to_expiry)
 
     return ArbitrageOpportunity(
         event_a=event_a,
@@ -139,6 +162,9 @@ def calculate_edge(
         no_b=round(no_b, 4),
         yes_spread=round(abs(yes_a - yes_b), 4),
         no_spread=round(abs(no_a - no_b), 4),
+        # Time-value
+        days_to_expiry=round(days_to_expiry, 1),
+        annualized_edge=round(annualized_edge, 2),
     )
 
 
@@ -172,8 +198,8 @@ def find_opportunities(
             opp.match_confidence = pair.match_confidence
             opportunities.append(opp)
 
-    # Sort by net edge descending
-    opportunities.sort(key=lambda o: o.net_edge_percent, reverse=True)
+    # Sort by annualized edge (time-value weighted) descending
+    opportunities.sort(key=lambda o: o.annualized_edge, reverse=True)
 
     logger.info(
         f"[Arbitrage] Found {len(opportunities)} opportunities "

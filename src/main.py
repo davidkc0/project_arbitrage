@@ -234,6 +234,9 @@ def build_state_payload() -> dict:
                 "no_b": opp.no_b,
                 "yes_spread": opp.yes_spread,
                 "no_spread": opp.no_spread,
+                # Time-value
+                "days_to_expiry": opp.days_to_expiry,
+                "annualized_edge": opp.annualized_edge,
             }
             for opp in current_opportunities[:50]
         ],

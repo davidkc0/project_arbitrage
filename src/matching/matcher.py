@@ -17,7 +17,7 @@ MATCH_THRESHOLD = 55
 # Bonus score if events share the same category
 CATEGORY_BONUS = 10
 # Maximum date gap between event end dates (days) to allow matching
-MAX_DATE_GAP_DAYS = 7
+MAX_DATE_GAP_DAYS = 30
 # Minimum keyword overlap to trigger expensive fuzzy matching
 MIN_KEYWORD_OVERLAP = 2
 
