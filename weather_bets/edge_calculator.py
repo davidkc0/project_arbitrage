@@ -28,6 +28,8 @@ def calculate_spreads(
     forecast: ForecastData,
     buckets: list[TemperatureBucket],
     days_ahead: int = 1,
+    current_observed_high: float | None = None,
+    hourly_forecast: list[dict] | None = None,
 ) -> list[SpreadBet]:
     """
     Build spread bets centered on the NWS forecast.
@@ -36,15 +38,66 @@ def calculate_spreads(
     - 2-bucket spread (forecast bucket + most likely adjacent)
     - 3-bucket spread (forecast bucket + both adjacents)
     
+    For same-day bets: uses current observed temp + hourly forecast to
+    determine a realistic floor and tighter distribution. If it's 88°F
+    at 1 PM and hourly says 90°F peak at 4 PM, the floor is 88°F but
+    there's still significant upside — the distribution shifts accordingly.
+    
     Returns spreads sorted by expected profit.
     """
     stdev = FORECAST_STDEV_24H if days_ahead <= 1 else FORECAST_STDEV_48H
     mean = forecast.high_temp_f
+    
+    temp_floor = None
+    if current_observed_high is not None and days_ahead <= 1:
+        temp_floor = current_observed_high
+        
+        # Use hourly forecast to estimate remaining heating potential
+        hourly_peak = None
+        if hourly_forecast:
+            hourly_temps = [h["temp_f"] for h in hourly_forecast]
+            if hourly_temps:
+                hourly_peak = max(hourly_temps)
+        
+        if hourly_peak and hourly_peak > current_observed_high:
+            remaining_rise = hourly_peak - current_observed_high
+            logger.info(
+                f"[Spread] Current: {current_observed_high}°F | "
+                f"Hourly NWS peak: {hourly_peak}°F | "
+                f"Consensus forecast: {mean}°F"
+            )
+            # Hourly peak is from NWS which runs hot. Use the LOWER of
+            # hourly peak and consensus forecast as our mean — this avoids
+            # inheriting NWS hot bias through the hourly data.
+            # But never go below current observed (that's a hard floor).
+            effective_mean = min(hourly_peak, mean)
+            effective_mean = max(effective_mean, current_observed_high)
+            logger.info(
+                f"[Spread] Effective mean: min(hourly={hourly_peak}, "
+                f"consensus={mean}) = {effective_mean}°F"
+            )
+            mean = effective_mean
+            # Tighten stdev — intraday we have better info, but hourly
+            # forecasts can still be off by 1-3°F
+            stdev = min(stdev, 2.5)
+        elif current_observed_high >= mean:
+            # Already at or past the forecast — likely near or past peak
+            logger.info(
+                f"[Spread] ⚠️ Current observed ({current_observed_high}°F) "
+                f"≥ consensus ({mean}°F) — may have peaked or still rising slightly"
+            )
+            mean = current_observed_high + 1
+            stdev = min(stdev, 2.0)  # Very tight — we're near the actual high
+        
+        logger.info(
+            f"[Spread] Same-day adjustment: floor={current_observed_high}°F, "
+            f"effective mean={mean}°F, stdev={stdev}°F"
+        )
 
     # Calculate probability for every bucket
     bucket_probs: list[tuple[TemperatureBucket, float]] = []
     for b in buckets:
-        prob = _bucket_probability(mean, stdev, b.low_bound, b.high_bound)
+        prob = _bucket_probability(mean, stdev, b.low_bound, b.high_bound, temp_floor)
         bucket_probs.append((b, prob))
 
     # Find the forecast bucket (which bucket contains the forecast temp)
@@ -60,8 +113,16 @@ def calculate_spreads(
         )
 
     if forecast_idx is None:
-        logger.warning("[Spread] Could not identify forecast bucket")
-        return []
+        # Fallback: use the bucket with the highest probability as center
+        if bucket_probs:
+            forecast_idx = max(range(len(bucket_probs)), key=lambda i: bucket_probs[i][1])
+            logger.info(
+                f"[Spread] Forecast temp ({mean}°F) outside bucket range — "
+                f"using highest-prob bucket as center: {bucket_probs[forecast_idx][0].label}"
+            )
+        else:
+            logger.warning("[Spread] No buckets available")
+            return []
 
     spreads: list[SpreadBet] = []
 
@@ -71,6 +132,17 @@ def calculate_spreads(
     # 3-bucket: forecast + both adjacents
     for width_name, indices in _spread_windows(forecast_idx, len(buckets)):
         selected = [(bucket_probs[i][0], bucket_probs[i][1]) for i in indices]
+
+        # Prune dead-weight legs: drop any bucket that adds cost but <2% probability
+        # (keeps the spread from paying for near-impossible outcomes)
+        pruned = [(b, p) for b, p in selected if p >= 0.02 or b.yes_price <= 0.01]
+        if len(pruned) < len(selected):
+            dropped = [b.label for b, p in selected if (b, p) not in pruned]
+            logger.info(f"  [{width_name}] Pruned dead-weight legs: {dropped}")
+            selected = pruned
+        if not selected:
+            continue
+
         spread_buckets = [s[0] for s in selected]
         spread_probs = [s[1] for s in selected]
 
@@ -164,14 +236,32 @@ def calculate_edges(
     forecast: ForecastData,
     buckets: list[TemperatureBucket],
     days_ahead: int = 1,
+    current_observed_high: float | None = None,
+    hourly_forecast: list[dict] | None = None,
 ) -> list[EdgeOpportunity]:
     """Calculate per-bucket edges (used for dashboard display)."""
     stdev = FORECAST_STDEV_24H if days_ahead <= 1 else FORECAST_STDEV_48H
     mean = forecast.high_temp_f
+    temp_floor = None
+    if current_observed_high is not None and days_ahead <= 1:
+        temp_floor = current_observed_high
+        hourly_peak = None
+        if hourly_forecast:
+            hourly_temps = [h["temp_f"] for h in hourly_forecast]
+            if hourly_temps:
+                hourly_peak = max(hourly_temps)
+        if hourly_peak and hourly_peak > current_observed_high:
+            effective_mean = min(hourly_peak, mean)
+            effective_mean = max(effective_mean, current_observed_high)
+            mean = effective_mean
+            stdev = min(stdev, 2.5)
+        elif current_observed_high >= mean:
+            mean = current_observed_high + 1
+            stdev = min(stdev, 2.0)
     opportunities = []
 
     for bucket in buckets:
-        our_prob = _bucket_probability(mean, stdev, bucket.low_bound, bucket.high_bound)
+        our_prob = _bucket_probability(mean, stdev, bucket.low_bound, bucket.high_bound, temp_floor)
         market_prob = bucket.yes_price
         edge = our_prob - market_prob
         ev = our_prob * (1.0 - bucket.yes_price) - (1.0 - our_prob) * bucket.yes_price
@@ -192,16 +282,40 @@ def calculate_edges(
 # ── Math helpers ────────────────────────────────────────────────────────
 
 def _bucket_probability(
-    mean: float, stdev: float, low: float | None, high: float | None
+    mean: float, stdev: float, low: float | None, high: float | None,
+    temp_floor: float | None = None,
 ) -> float:
-    """Probability that temp falls in [low, high] given N(mean, stdev)."""
+    """Probability that temp falls in [low, high] given N(mean, stdev).
+    
+    If temp_floor is set, the distribution is truncated: the daily high
+    cannot be below temp_floor (it's already been observed). Probabilities
+    for buckets entirely below the floor are 0, and remaining probabilities
+    are renormalized.
+    """
+    # If bucket is entirely below the floor, probability is 0
+    if temp_floor is not None and high is not None and high < temp_floor:
+        return 0.0
+    
+    # Raw probability from normal distribution
     if low is None and high is not None:
-        return _norm_cdf(high + 0.5, mean, stdev)
+        raw = _norm_cdf(high + 0.5, mean, stdev)
     elif low is not None and high is not None:
-        return _norm_cdf(high + 0.5, mean, stdev) - _norm_cdf(low - 0.5, mean, stdev)
+        # If floor cuts into this bucket, adjust the lower bound
+        effective_low = max(low, temp_floor) if temp_floor is not None else low
+        raw = _norm_cdf(high + 0.5, mean, stdev) - _norm_cdf(effective_low - 0.5, mean, stdev)
+        raw = max(0.0, raw)
     elif low is not None and high is None:
-        return 1.0 - _norm_cdf(low - 0.5, mean, stdev)
-    return 0.0
+        raw = 1.0 - _norm_cdf(low - 0.5, mean, stdev)
+    else:
+        return 0.0
+    
+    # If we have a floor, renormalize: P(bucket | temp >= floor)
+    if temp_floor is not None:
+        p_above_floor = 1.0 - _norm_cdf(temp_floor - 0.5, mean, stdev)
+        if p_above_floor > 0.01:  # Avoid division by near-zero
+            raw = raw / p_above_floor
+    
+    return min(raw, 1.0)
 
 
 def _norm_cdf(x: float, mean: float, stdev: float) -> float:

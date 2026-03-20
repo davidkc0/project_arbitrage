@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     polymarket_fee_rate: float = 0.02     # ~2% on winnings
     kalshi_fee_rate: float = 0.03         # ~3% on winnings (varies)
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 # Singleton

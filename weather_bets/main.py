@@ -72,12 +72,20 @@ async def run_scan_cycle():
         log(f"\n📍 Scanning {city.name}...")
 
         # Step 1: Fetch historical observations for bias analysis
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        current_observed_high = None
         try:
             historical = await fetch_historical_temps(city)
             scan_state["historical"] = [
                 {"date": h["date"], "high": h["tmax"], "low": h["tmin"]}
                 for h in historical
             ]
+            # Extract today's current observed high as a floor for same-day bets
+            for h in historical:
+                if h["date"] == today_str:
+                    current_observed_high = h["tmax"]
+                    log(f"📡 Current observed high today: {current_observed_high}°F")
+                    break
         except Exception as e:
             log(f"⚠️ Historical data error: {e}")
             historical = []
@@ -154,8 +162,17 @@ async def run_scan_cycle():
 
             days_ahead = i + 1
 
+            # Fetch hourly forecast early so we can use it for same-day calcs
+            hourly = None
+            try:
+                hourly = await fetch_hourly_forecast(city, fc.date)
+            except Exception:
+                pass
+
             # Calculate per-bucket edges using CONSENSUS temp
-            edges = calculate_edges(consensus_fc, buckets, days_ahead)
+            # Pass current observed high + hourly for same-day bets
+            obs_high = current_observed_high if days_ahead == 1 else None
+            edges = calculate_edges(consensus_fc, buckets, days_ahead, obs_high, hourly)
             scan_state["opportunities"].extend([
                 {
                     "city": o.city, "date": o.date, "bucket": o.bucket.label,
@@ -172,7 +189,7 @@ async def run_scan_cycle():
             ])
 
             # Build spread bets using CONSENSUS temp
-            spreads = calculate_spreads(consensus_fc, buckets, days_ahead)
+            spreads = calculate_spreads(consensus_fc, buckets, days_ahead, obs_high, hourly)
 
             for sp in spreads:
                 labels = " + ".join(b.label for b in sp.buckets)
@@ -187,13 +204,6 @@ async def run_scan_cycle():
                     "roi": round(sp.roi_percent, 1),
                     "n_buckets": len(sp.buckets),
                 })
-
-            # Fetch hourly forecast
-            hourly = None
-            try:
-                hourly = await fetch_hourly_forecast(city, fc.date)
-            except Exception:
-                pass
 
             bucket_summary = ""
             for b in buckets:

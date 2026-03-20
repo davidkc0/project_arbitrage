@@ -164,8 +164,22 @@ def build_consensus(
 
     alt_avg = sum(alt_temps) / len(alt_temps)
     all_temps = [nws_high] + alt_temps
-    consensus = sum(all_temps) / len(all_temps)
     spread = max(all_temps) - min(all_temps)
+
+    # Weight NWS less when it disagrees with the model consensus.
+    # NWS historically runs hot; independent models (ICON, GEM) provide
+    # a useful check. When models agree and NWS is the outlier, lean
+    # toward models. Simple approach: 1 vote for NWS, 1 vote per model,
+    # but cap NWS contribution when spread is large.
+    if spread > 2.0 and abs(nws_high - alt_avg) > 1.5:
+        # NWS is an outlier — weight models more heavily (2:1 models vs NWS)
+        consensus = (nws_high + 2 * alt_avg) / 3
+        logger.info(
+            f"[Consensus] NWS outlier detected (spread={spread:.0f}°F) — "
+            f"weighting models 2:1 over NWS"
+        )
+    else:
+        consensus = sum(all_temps) / len(all_temps)
 
     model_details = [
         f for f in open_meteo_forecasts if f.get("date") == target_date
