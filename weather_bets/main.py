@@ -594,6 +594,44 @@ async def trigger_rescan():
     asyncio.create_task(run_scan_cycle())
     return {"status": "scan_triggered"}
 
+@app.get("/api/pending")
+async def get_pending_bets():
+    """Return all bets awaiting DC approval (semi-auto mode)."""
+    import json as _json
+    from pathlib import Path
+    queue_file = Path(__file__).parent / "data" / "pending_bets.json"
+    if not queue_file.exists():
+        return {"pending": []}
+    try:
+        queue = _json.loads(queue_file.read_text())
+        return {"pending": [b for b in queue if b.get("status") == "pending"]}
+    except Exception:
+        return {"pending": []}
+
+@app.post("/api/approve/{ticker}")
+async def approve_bet(ticker: str):
+    """DC approves a pending bet — executes it immediately."""
+    success = await executor.execute_approved_bet(ticker)
+    if success:
+        return {"status": "executed", "ticker": ticker}
+    return {"status": "failed", "ticker": ticker}
+
+@app.post("/api/reject/{ticker}")
+async def reject_bet(ticker: str):
+    """DC rejects a pending bet — removes it from the queue."""
+    import json as _json
+    from pathlib import Path
+    queue_file = Path(__file__).parent / "data" / "pending_bets.json"
+    if not queue_file.exists():
+        return {"status": "not_found"}
+    queue = _json.loads(queue_file.read_text())
+    for b in queue:
+        if b["ticker"] == ticker and b["status"] == "pending":
+            b["status"] = "rejected"
+    queue_file.write_text(_json.dumps(queue, indent=2))
+    logger.info(f"[Semi-auto] Bet rejected by DC: {ticker}")
+    return {"status": "rejected", "ticker": ticker}
+
 @app.get("/{filename}")
 async def serve_static(filename: str):
     filepath = DASHBOARD_DIR / filename

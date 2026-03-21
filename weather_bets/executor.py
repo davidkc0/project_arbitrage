@@ -312,6 +312,21 @@ class WeatherExecutor:
                 f"  LLM confidence: {rec.confidence:.0%}\n"
                 f"  Reasoning: {rec.reasoning}"
             )
+        elif EXECUTION_MODE == "semi":
+            # ── SEMI-AUTO: queue for DC approval, do NOT execute yet ──
+            logger.info(
+                f"[Executor] ⏸️  SEMI-AUTO — Awaiting DC approval:\n"
+                f"  Ticker: {ticker}\n"
+                f"  Side: {rec.side.upper()}\n"
+                f"  Price: ${opp.bucket.yes_price:.2f} ({price_cents}¢)\n"
+                f"  Contracts: {contracts}\n"
+                f"  Total cost: ${bet.cost_usd:.2f}\n"
+                f"  Edge: {opp.edge_percent:+.1f}%\n"
+                f"  LLM confidence: {rec.confidence:.0%}\n"
+                f"  Reasoning: {rec.reasoning}"
+            )
+            # Save to pending queue file for DC review — do NOT execute
+            self._queue_pending_bet(bet, rec)
         elif EXECUTION_MODE == "live":
             # ── DRAWDOWN + BUDGET CHECK ──
             remaining_budget = await self.get_betting_budget()
@@ -391,6 +406,102 @@ class WeatherExecutor:
         # Dry run — always log
         self.placed_bets.append(bet)
         return bet
+
+    def _queue_pending_bet(self, bet: PlacedBet, rec: BetRecommendation) -> None:
+        """Save a bet to the pending approval queue (semi-auto mode)."""
+        from pathlib import Path
+        import json as _json
+        queue_file = Path(__file__).parent / "data" / "pending_bets.json"
+        # ⚠️ DO NOT DELETE pending_bets.json — it holds bets awaiting DC approval
+        queue = []
+        if queue_file.exists():
+            try:
+                queue = _json.loads(queue_file.read_text())
+            except Exception:
+                pass
+        opp = rec.opportunity
+        queue.append({
+            "id": bet.id,
+            "ticker": bet.ticker,
+            "city": opp.city,
+            "date": opp.date,
+            "bucket": opp.bucket.label,
+            "side": rec.side,
+            "price": opp.bucket.yes_price,
+            "contracts": bet.quantity,
+            "cost": round(bet.cost_usd, 2),
+            "edge": round(opp.edge_percent, 1),
+            "our_prob": round(opp.our_probability * 100, 1),
+            "ev": round(opp.our_probability * (1 - opp.bucket.yes_price) - (1 - opp.our_probability) * opp.bucket.yes_price, 3),
+            "confidence": round(rec.confidence * 100),
+            "reasoning": rec.reasoning,
+            "queued_at": datetime.utcnow().isoformat(),
+            "status": "pending",
+        })
+        queue_file.write_text(_json.dumps(queue, indent=2))
+        logger.info(f"[Executor] ⏸️  Queued for approval: {bet.ticker} ${bet.cost_usd:.2f}")
+
+    async def execute_approved_bet(self, ticker: str) -> bool:
+        """Execute a previously queued bet after DC approval."""
+        from pathlib import Path
+        import json as _json
+        from weather_bets.trade_log import save_trade
+        queue_file = Path(__file__).parent / "data" / "pending_bets.json"
+        if not queue_file.exists():
+            return False
+        queue = _json.loads(queue_file.read_text())
+        pending = next((b for b in queue if b["ticker"] == ticker and b["status"] == "pending"), None)
+        if not pending:
+            logger.warning(f"[Executor] No pending bet found for {ticker}")
+            return False
+        price_cents = int(pending["price"] * 100)
+        try:
+            path = "/portfolio/orders"
+            full_path = f"/trade-api/v2{path}"
+            order_payload = {
+                "ticker": ticker,
+                "client_order_id": str(uuid.uuid4()),
+                "type": "limit",
+                "action": "buy",
+                "side": pending["side"],
+                "count": pending["contracts"],
+                "yes_price": price_cents,
+            }
+            headers = self._auth_headers("POST", full_path)
+            resp = await self._http.post(path, json=order_payload, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+            order_id = data.get("order", {}).get("order_id", "unknown")
+            logger.info(f"[Executor] ✅ APPROVED BET PLACED — {ticker} order_id={order_id}")
+            # Mark as executed in queue
+            for b in queue:
+                if b["ticker"] == ticker and b["status"] == "pending":
+                    b["status"] = "executed"
+                    b["order_id"] = order_id
+            queue_file.write_text(_json.dumps(queue, indent=2))
+            # Save to trade log only after confirmed
+            save_trade({
+                "id": order_id,
+                "ticker": ticker,
+                "city": pending["city"],
+                "date": pending["date"],
+                "bucket": pending["bucket"],
+                "side": pending["side"],
+                "price": pending["price"],
+                "qty": pending["contracts"],
+                "cost": pending["cost"],
+                "edge": pending["edge"],
+                "our_prob": pending["our_prob"],
+                "market_prob": pending["price"] * 100,
+                "reasoning": pending["reasoning"],
+                "mode": "semi",
+                "time": datetime.utcnow().isoformat(),
+                "settled": False, "won": None, "pnl": None,
+            })
+            return True
+        except Exception as e:
+            logger.error(f"[Executor] ❌ Approved bet failed: {e}", exc_info=True)
+            return False
 
     async def check_settlements(self) -> list[dict]:
         """
