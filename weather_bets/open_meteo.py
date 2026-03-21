@@ -142,12 +142,16 @@ def build_consensus(
     open_meteo_forecasts: list[dict],
     target_date: str,
     days_out: int = 1,
+    city_code: str | None = None,
 ) -> dict:
     """
     Build a consensus forecast from multiple sources using dynamic weights.
 
-    Weights are derived from historical forecast accuracy via forecast_tracker.
-    Falls back to equal weights when < 5 settled data points.
+    Weights are derived from historical forecast accuracy:
+    - If city_code is provided and has >= 5 settled data points, uses per-city weights
+      from accuracy_tracker (city-aware: e.g. coastal cities may favor GFS).
+    - Otherwise falls back to global weights from forecast_tracker.
+    - Falls back to equal weights when < 5 settled data points in either source.
 
     Returns {consensus_high, nws_high, alt_high, alt_avg, spread, sources, model_details}
     """
@@ -186,8 +190,24 @@ def build_consensus(
     all_temps = [nws_high] + alt_temps
     spread = max(all_temps) - min(all_temps)
 
-    # Get dynamic weights from forecast_tracker
-    weights = get_optimal_weights(days_out)
+    # Get dynamic weights — prefer city-specific weights when available
+    weights = None
+    weights_source = "global"
+
+    if city_code:
+        try:
+            from weather_bets.accuracy_tracker import get_model_weights as get_city_weights
+            city_weights = get_city_weights(city_code, days_out)
+            # Only use city weights if they've diverged from equal (i.e., we have enough data)
+            if any(abs(v - 0.25) > 0.01 for v in city_weights.values()):
+                weights = city_weights
+                weights_source = f"city:{city_code}"
+        except Exception as e:
+            logger.debug(f"[Consensus] Could not get city weights for {city_code}: {e}")
+
+    if weights is None:
+        weights = get_optimal_weights(days_out)
+        weights_source = "global"
 
     # Compute weighted average — only include sources we actually have data for
     weighted_sum = 0.0
@@ -211,15 +231,15 @@ def build_consensus(
     if spread > 2.0 and abs(nws_high - alt_avg) > 1.5:
         logger.info(
             f"[Consensus] NWS outlier detected (NWS={nws_high}°F, models avg={alt_avg:.1f}°F, "
-            f"spread={spread:.1f}°F) — using dynamic weights "
+            f"spread={spread:.1f}°F) — using {weights_source} weights "
             f"(nws={weights['nws']:.2f}, gfs={weights['gfs']:.2f}, "
             f"icon={weights['icon']:.2f}, gem={weights['gem']:.2f})"
         )
 
     logger.info(
-        f"[Consensus] {days_out}d-out: NWS={nws_high}°F, Alt avg={alt_avg:.1f}°F → "
+        f"[Consensus] {city_code or '?'} {days_out}d-out: NWS={nws_high}°F, Alt avg={alt_avg:.1f}°F → "
         f"Consensus={consensus:.1f}°F (spread={spread:.1f}°F, "
-        f"weights: nws={weights['nws']:.2f} gfs={weights['gfs']:.2f} "
+        f"weights[{weights_source}]: nws={weights['nws']:.2f} gfs={weights['gfs']:.2f} "
         f"icon={weights['icon']:.2f} gem={weights['gem']:.2f})"
     )
 
@@ -232,5 +252,6 @@ def build_consensus(
         "sources": ["NWS"] + [f["model"] for f in model_details],
         "model_details": model_details,
         "weights_used": weights,
+        "weights_source": weights_source,
         "days_out": days_out,
     }

@@ -117,6 +117,7 @@ async def analyze_spread(
 4. For spreads with 50%+ probability: almost always BET unless EV is barely positive and there's a weather concern.
 5. We are NOT looking for certainty — we are looking for +EV bets we can repeat daily across multiple cities.
 6. Scale bet size with confidence: high conviction = full ${BET_SIZE_USD}, moderate = ${BET_SIZE_USD * 0.5:.0f}-${BET_SIZE_USD:.0f}.
+7. **CRITICAL — respect the market:** If any bucket NOT in our spread is priced above $0.65, the market is very confident the outcome lands there. Only bet against high market conviction if our forecast firmly disagrees AND there's a clear reason (NWS bias, model disagreement). Never fight the tape without a good reason.
 
 **CRITICAL — Directional integrity:**
 - If the hourly forecast shows a peak ABOVE our spread's upper bound, that is a SKIP. We should never bet "under X" if hourly says it'll exceed X.

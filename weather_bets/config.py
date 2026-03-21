@@ -25,6 +25,15 @@ SCAN_INTERVAL: int = int(os.getenv("WEATHER_SCAN_INTERVAL", "1800"))  # 30 min
 PRICE_WATCH_INTERVAL: int = int(os.getenv("WEATHER_PRICE_WATCH_INTERVAL", "120"))  # 2 min
 EXECUTION_MODE: str = os.getenv("WEATHER_EXECUTION_MODE", "dry")  # "dry" or "live"
 
+# ── Risk Management ─────────────────────────────────────────────────────
+# Bet size as % of current balance (dynamic sizing)
+BET_SIZE_PCT: float = float(os.getenv("WEATHER_BET_SIZE_PCT", "0.06"))  # 6% of balance per bet
+# Hard floor — stop all betting if balance drops below this
+DRAWDOWN_FLOOR_USD: float = float(os.getenv("WEATHER_DRAWDOWN_FLOOR", "15.0"))
+# Market sanity check — if any adjacent bucket is priced above this,
+# we need strong conviction (our prob > bucket threshold + margin) to bet against it
+MARKET_CONVICTION_THRESHOLD: float = float(os.getenv("WEATHER_CONVICTION_THRESHOLD", "0.65"))
+
 # ── NWS Forecast Settings ───────────────────────────────────────────────
 # Standard deviation for temperature forecast uncertainty (°F)
 # NWS 24h forecasts are typically within ±2-3°F
@@ -47,22 +56,56 @@ CITIES: dict[str, CityConfig] = {
         lat=30.1975,    # Austin-Bergstrom International Airport
         lon=-97.6664,
     ),
-    # Future: add more cities
-    # "SFO": CityConfig(
-    #     code="SFO",
-    #     name="San Francisco",
-    #     kalshi_series="KXHIGHSFO",
-    #     nws_office="MTR",
-    #     nws_grid_x=85,
-    #     nws_grid_y=105,
-    #     station_id="KSFO",
-    #     lat=37.6213,
-    #     lon=-122.3790,
-    # ),
+    "LAX": CityConfig(
+        code="LAX",
+        name="Los Angeles",
+        kalshi_series="KXHIGHLAX",
+        nws_office="LOX",
+        nws_grid_x=148,
+        nws_grid_y=41,
+        station_id="KLAX",
+        lat=33.9425,    # Los Angeles International Airport
+        lon=-118.4081,
+    ),
+    "CHI": CityConfig(
+        code="CHI",
+        name="Chicago",
+        kalshi_series="KXHIGHCHI",
+        nws_office="LOT",
+        nws_grid_x=66,
+        nws_grid_y=77,
+        station_id="KORD",
+        lat=41.9742,    # O'Hare International Airport
+        lon=-87.9073,
+    ),
+    "MIA": CityConfig(
+        code="MIA",
+        name="Miami",
+        kalshi_series="KXHIGHMIA",
+        nws_office="MFL",
+        nws_grid_x=106,
+        nws_grid_y=51,
+        station_id="KMIA",
+        lat=25.7959,    # Miami International Airport
+        lon=-80.2870,
+    ),
+    "DEN": CityConfig(
+        code="DEN",
+        name="Denver",
+        kalshi_series="KXHIGHDEN",
+        nws_office="BOU",
+        nws_grid_x=74,
+        nws_grid_y=66,
+        station_id="KDEN",
+        lat=39.8561,    # Denver International Airport
+        lon=-104.6737,
+    ),
 }
 
-# Active cities for scanning (start with Austin)
-ACTIVE_CITIES: list[str] = ["AUS"]
+# Active cities for scanning
+# Only include cities with active Kalshi temperature high markets
+# SFO/NYC/DAL/PHX/BOS/SEA currently have no active markets
+ACTIVE_CITIES: list[str] = ["AUS"]  # Start with Austin only — expand after validation
 
 # ── Server ───────────────────────────────────────────────────────────────
 SERVER_HOST: str = "127.0.0.1"

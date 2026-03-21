@@ -22,6 +22,10 @@ from weather_bets.models import BetDecision, BetRecommendation, EdgeOpportunity,
 from weather_bets.nws_forecast import fetch_forecast, fetch_hourly_forecast
 from weather_bets.open_meteo import fetch_multi_model_forecast, build_consensus
 from weather_bets.forecast_tracker import save_forecast, record_actual
+from weather_bets.accuracy_tracker import (
+    log_forecast as log_city_forecast,
+    record_actual as record_city_actual,
+)
 from weather_bets.price_watcher import PriceWatcher
 from weather_bets.position_manager import PositionManager
 from weather_bets.trade_log import (
@@ -98,6 +102,8 @@ async def run_scan_cycle():
                 if obs_date < today_str:  # only past dates have final actuals
                     try:
                         record_actual(obs_date, h["tmax"])
+                        # Also record in city-aware accuracy tracker
+                        record_city_actual(city_code, obs_date, h["tmax"])
                     except Exception as te:
                         logger.warning(f"[Tracker] record_actual error for {obs_date}: {te}")
         except Exception as e:
@@ -137,8 +143,8 @@ async def run_scan_cycle():
         for i, fc in enumerate(forecasts[:3]):
             days_out = i + 1  # i=0 → 1d out, i=1 → 2d out, etc.
 
-            # Build consensus from NWS + Open-Meteo models
-            consensus = build_consensus(fc.high_temp_f, model_forecasts, fc.date, days_out=days_out)
+            # Build consensus from NWS + Open-Meteo models (city-aware weights when available)
+            consensus = build_consensus(fc.high_temp_f, model_forecasts, fc.date, days_out=days_out, city_code=city_code)
             scan_state["consensus"][fc.date] = consensus
 
             # Save forecast for accuracy tracking
@@ -160,6 +166,17 @@ async def run_scan_cycle():
                     nws=fc.high_temp_f,
                     models_dict=models_dict,
                     days_out=days_out,
+                )
+                # Also log in city-aware accuracy tracker (consensus is already computed above)
+                log_city_forecast(
+                    city_code=city_code,
+                    target_date=fc.date,
+                    days_out=days_out,
+                    nws=fc.high_temp_f,
+                    gfs=models_dict.get("gfs"),
+                    icon=models_dict.get("icon"),
+                    gem=models_dict.get("gem"),
+                    consensus=consensus.get("consensus_high"),
                 )
             except Exception as te:
                 logger.warning(f"[Tracker] save_forecast error for {fc.date}: {te}")
@@ -324,8 +341,13 @@ async def run_scan_cycle():
                             "time": bet.placed_at.isoformat(),
                             "settled": False, "won": None, "pnl": None,
                         }
-                        save_trade(trade_record)
-                        scan_state["placed_bets"].append(trade_record)
+                        # Only save if the order was actually confirmed on Kalshi
+                        # A real order_id is a UUID (36 chars); stubs are 8-char hex
+                        if config.EXECUTION_MODE == "dry" or len(bet.id) > 10:
+                            save_trade(trade_record)
+                            scan_state["placed_bets"].append(trade_record)
+                        else:
+                            log(f"  ⚠️ Order not confirmed — not logging to trade log")
                 else:
                     log(f"  ⏭️  Claude says SKIP: {rec.reasoning}")
 
@@ -448,9 +470,12 @@ async def handle_momentum_signal(ticker: str, signal: str) -> None:
             "won": None,
             "pnl": None,
         }
-        save_trade(trade_record)
-        scan_state["placed_bets"].append(trade_record)
-        scan_state["trade_summary"] = get_trade_summary()
+        if config.EXECUTION_MODE == "dry" or len(bet.id) > 10:
+            save_trade(trade_record)
+            scan_state["placed_bets"].append(trade_record)
+            scan_state["trade_summary"] = get_trade_summary()
+        else:
+            logger.warning(f"[Momentum] Order not confirmed — not logging to trade log")
 
         if price_watcher:
             price_watcher.clear_signal(ticker)
@@ -479,6 +504,25 @@ async def momentum_loop() -> None:
 
 
 # ── Scan Loop ───────────────────────────────────────────────────────────
+
+async def settlement_loop():
+    """
+    Check Kalshi for settled positions every 30 minutes.
+    Runs independently of the main scan loop so settlements are caught promptly.
+    """
+    # Initial delay to let executor initialize first
+    await asyncio.sleep(30)
+    while True:
+        try:
+            newly_settled = await executor.check_settlements()
+            if newly_settled:
+                scan_state["trade_summary"] = get_trade_summary()
+                logger.info(f"[SettlementLoop] {len(newly_settled)} new settlements: "
+                            f"{[s['ticker'] for s in newly_settled]}")
+        except Exception as e:
+            logger.error(f"[SettlementLoop] Error: {e}", exc_info=True)
+        await asyncio.sleep(1800)  # 30 minutes
+
 
 async def scan_loop():
     global price_watcher
@@ -513,10 +557,12 @@ async def lifespan(app: FastAPI):
     scan_task = asyncio.create_task(scan_loop())
     price_watch_task = asyncio.create_task(_price_watch_delayed())
     momentum_task = asyncio.create_task(momentum_loop())
+    settlement_task = asyncio.create_task(settlement_loop())
     yield
     scan_task.cancel()
     price_watch_task.cancel()
     momentum_task.cancel()
+    settlement_task.cancel()
     await executor.close()
     await position_manager.close()
 

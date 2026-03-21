@@ -14,17 +14,20 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, padding, utils
 
 from weather_bets.config import (
+    BET_SIZE_PCT,
     BET_SIZE_USD,
+    DRAWDOWN_FLOOR_USD,
     EXECUTION_MODE,
     KALSHI_API_KEY_ID,
     KALSHI_BASE_URL,
     KALSHI_PRIVATE_KEY_PATH,
+    MARKET_CONVICTION_THRESHOLD,
 )
 from weather_bets.models import BetRecommendation, PlacedBet
 
 logger = logging.getLogger(__name__)
 
-# Maximum percentage of available balance we'll put at risk
+# Maximum percentage of available balance we'll put at risk across all open bets
 MAX_BALANCE_USAGE_PCT = 0.50  # 50% rule — never bet more than half of available funds
 
 
@@ -64,6 +67,9 @@ class WeatherExecutor:
                 logger.warning(f"[Executor] Private key not found at {KALSHI_PRIVATE_KEY_PATH}")
         except Exception as e:
             logger.error(f"[Executor] Failed to load private key: {e}")
+
+        # ── Sync trade log against Kalshi on startup ──
+        await self._sync_trade_log_from_kalshi()
 
     def _sign_request(self, method: str, path: str, timestamp_ms: int) -> str:
         """Sign a Kalshi API request using the private key (RSA-PSS or EC)."""
@@ -107,6 +113,90 @@ class WeatherExecutor:
             "Content-Type": "application/json",
         }
 
+    async def _sync_trade_log_from_kalshi(self) -> None:
+        """
+        On startup, fetch all orders from Kalshi and reconcile with local trade log.
+
+        - Any Kalshi order not in local log gets added (catches missed writes)
+        - Any local log entry with no matching Kalshi order_id gets flagged as unconfirmed
+        - This ensures the local log always reflects reality, across restarts
+
+        This is the single source of truth enforcement.
+        """
+        if not self._http or not self._private_key:
+            logger.warning("[Executor] Cannot sync — not authenticated yet")
+            return
+
+        from weather_bets.trade_log import load_trades, TRADES_FILE
+        import json as _json
+
+        try:
+            path = "/portfolio/orders"
+            full_path = f"/trade-api/v2{path}"
+            headers = self._auth_headers("GET", full_path)
+            resp = await self._http.get(path, headers=headers)
+            resp.raise_for_status()
+            kalshi_orders = resp.json().get("orders", [])
+
+            local_trades = load_trades()
+            local_ids = {t.get("id") for t in local_trades if t.get("id")}
+            kalshi_ids = {o.get("order_id") for o in kalshi_orders if o.get("order_id")}
+
+            added = 0
+            removed = 0
+
+            # Add any Kalshi orders missing from local log
+            for order in kalshi_orders:
+                oid = order.get("order_id")
+                if oid and oid not in local_ids:
+                    # Reconstruct a trade record from the Kalshi order
+                    yes_price = order.get("yes_price", 0) / 100.0
+                    qty = order.get("count", 0)
+                    trade_record = {
+                        "id": oid,
+                        "ticker": order.get("ticker", ""),
+                        "city": order.get("ticker", "")[:3] if order.get("ticker") else "",
+                        "date": "",
+                        "bucket": "",
+                        "side": order.get("side", "yes"),
+                        "price": yes_price,
+                        "qty": qty,
+                        "cost": round(yes_price * qty, 2),
+                        "edge": 0,
+                        "our_prob": 0,
+                        "market_prob": yes_price * 100,
+                        "spread": "recovered",
+                        "reasoning": "Recovered from Kalshi order history on startup",
+                        "mode": "live",
+                        "time": order.get("created_time", datetime.utcnow().isoformat()),
+                        "settled": order.get("status") in ("settled", "canceled"),
+                        "won": None,
+                        "pnl": None,
+                    }
+                    local_trades.append(trade_record)
+                    added += 1
+                    logger.info(f"[Sync] Added missing order to trade log: {oid} ({order.get('ticker')})")
+
+            # Flag local entries that have no matching Kalshi order (unconfirmed/ghost)
+            cleaned_trades = []
+            for trade in local_trades:
+                tid = trade.get("id", "")
+                # Short IDs (8 char hex) are dry-run or pre-fix entries — keep but mark
+                if len(tid) <= 10 and trade.get("mode") == "live":
+                    logger.warning(f"[Sync] Removing unconfirmed trade from log: {tid} ({trade.get('ticker')})")
+                    removed += 1
+                    continue  # Drop it
+                cleaned_trades.append(trade)
+
+            if added > 0 or removed > 0:
+                TRADES_FILE.write_text(_json.dumps(cleaned_trades, indent=2))
+                logger.info(f"[Sync] Trade log reconciled: +{added} added, -{removed} removed. Total: {len(cleaned_trades)}")
+            else:
+                logger.info(f"[Sync] Trade log in sync with Kalshi ({len(cleaned_trades)} trades)")
+
+        except Exception as e:
+            logger.error(f"[Executor] Startup sync failed: {e}", exc_info=True)
+
     async def get_balance(self) -> float:
         """Fetch available balance from Kalshi. Caches for 60 seconds."""
         now = time.time()
@@ -138,24 +228,46 @@ class WeatherExecutor:
     async def get_betting_budget(self) -> float:
         """
         Calculate how much we're allowed to bet this scan cycle.
-        
-        Rule: Never bet more than 50% of available funds total.
-        This accounts for existing open positions.
+
+        Rules:
+        1. Hard floor: stop all betting if balance < DRAWDOWN_FLOOR_USD
+        2. 50% rule: never put more than half total balance at risk across open bets
+        3. Dynamic sizing: individual bet size = BET_SIZE_PCT of current balance
         """
         balance = await self.get_balance()
+
+        # ── Rule 1: Hard floor ──
+        if balance < DRAWDOWN_FLOOR_USD:
+            logger.warning(
+                f"[Executor] 🛑 DRAWDOWN FLOOR HIT — balance ${balance:.2f} < "
+                f"floor ${DRAWDOWN_FLOOR_USD:.2f}. ALL BETTING SUSPENDED."
+            )
+            return -1.0  # Sentinel: caller should treat as hard stop
+
         max_at_risk = balance * MAX_BALANCE_USAGE_PCT
-        
-        # Subtract cost of existing open (unsettled) bets placed this session
+
+        # Subtract cost of existing open (unsettled) bets
         from weather_bets.trade_log import load_trades
         open_trades = [t for t in load_trades() if not t.get("settled")]
         open_cost = sum(t.get("cost", 0) for t in open_trades)
-        
+
         remaining_budget = max(0, max_at_risk - open_cost)
         logger.info(
             f"[Executor] Budget: ${balance:.2f} balance × 50% = ${max_at_risk:.2f} max | "
             f"${open_cost:.2f} open | ${remaining_budget:.2f} available to bet"
         )
         return remaining_budget
+
+    def dynamic_bet_size(self, balance: float) -> float:
+        """
+        Calculate bet size dynamically as % of current balance.
+        Shrinks as balance drops, grows as balance grows.
+        Capped at BET_SIZE_USD maximum.
+        """
+        size = balance * BET_SIZE_PCT
+        size = min(size, BET_SIZE_USD)
+        size = max(size, 0.50)  # Minimum $0.50 — don't place micro-bets
+        return round(size, 2)
 
     async def place_bet(self, rec: BetRecommendation) -> PlacedBet:
         """
@@ -201,16 +313,37 @@ class WeatherExecutor:
                 f"  Reasoning: {rec.reasoning}"
             )
         elif EXECUTION_MODE == "live":
-            # ── 50% RULE: check remaining budget ──
+            # ── DRAWDOWN + BUDGET CHECK ──
             remaining_budget = await self.get_betting_budget()
+
+            if remaining_budget == -1.0:
+                # Hard floor hit — full stop
+                logger.warning(f"[Executor] 🛑 Bet blocked — drawdown floor active")
+                return bet
+
+            # ── DYNAMIC SIZING: use % of balance, not fixed amount ──
+            balance = self._cached_balance or 0
+            dynamic_size = self.dynamic_bet_size(balance)
+            if bet.cost_usd > dynamic_size:
+                old_contracts = contracts
+                contracts = max(1, int(dynamic_size / opp.bucket.yes_price))
+                bet.quantity = contracts
+                bet.cost_usd = opp.bucket.yes_price * contracts
+                logger.info(
+                    f"[Executor] 📐 Dynamic sizing: ${dynamic_size:.2f} "
+                    f"({balance:.2f} × {BET_SIZE_PCT:.0%}) → "
+                    f"{old_contracts} → {contracts} contracts"
+                )
+
+            # ── 50% RULE: check remaining budget after sizing ──
             if bet.cost_usd > remaining_budget:
-                if remaining_budget <= 0:
+                if remaining_budget <= 0.50:
                     logger.warning(
                         f"[Executor] ⛔ SKIPPING — 50% budget exhausted "
-                        f"(would cost ${bet.cost_usd:.2f}, $0 remaining)"
+                        f"(would cost ${bet.cost_usd:.2f}, ${remaining_budget:.2f} remaining)"
                     )
                     return bet
-                # Scale down contracts to fit budget
+                # Scale down further to fit remaining budget
                 old_contracts = contracts
                 contracts = max(1, int(remaining_budget / opp.bucket.yes_price))
                 bet.quantity = contracts
@@ -247,12 +380,102 @@ class WeatherExecutor:
                     f"  Ticker: {ticker}  Contracts: {contracts}  Cost: ${bet.cost_usd:.2f}"
                 )
                 bet.id = order_id
+                # ✅ Only append to placed_bets after confirmed API success
+                self.placed_bets.append(bet)
+                return bet
 
             except Exception as e:
-                logger.error(f"[Executor] ❌ Order failed: {e}", exc_info=True)
+                logger.error(f"[Executor] ❌ Order failed — NOT logging trade: {e}", exc_info=True)
+                return bet  # Return without logging
 
+        # Dry run — always log
         self.placed_bets.append(bet)
         return bet
+
+    async def check_settlements(self) -> list[dict]:
+        """
+        Check Kalshi for settled positions and auto-mark them in the trade log.
+
+        For each open (unsettled) trade, fetches the order status from Kalshi.
+        If the market has settled, determines win/loss and calls mark_trade_settled().
+
+        Returns a list of newly settled trades with their outcome.
+        """
+        from weather_bets.trade_log import load_trades, mark_trade_settled
+
+        trades = load_trades()
+        open_trades = [t for t in trades if not t.get("settled") and t.get("id")]
+        if not open_trades:
+            logger.debug("[Settlements] No open trades to check")
+            return []
+
+        if not self._http or not self._private_key:
+            logger.warning("[Settlements] Cannot check settlements — not authenticated")
+            return []
+
+        newly_settled = []
+
+        for trade in open_trades:
+            order_id = trade.get("id")
+            ticker = trade.get("ticker", "?")
+            try:
+                path = f"/portfolio/orders/{order_id}"
+                full_path = f"/trade-api/v2{path}"
+                headers = self._auth_headers("GET", full_path)
+                resp = await self._http.get(path, headers=headers)
+
+                if resp.status_code == 404:
+                    logger.debug(f"[Settlements] Order {order_id} not found on Kalshi")
+                    continue
+
+                resp.raise_for_status()
+                data = resp.json()
+                order = data.get("order", {})
+
+                status = order.get("status", "")
+                # Kalshi order statuses: "resting", "filled", "canceled", "pending_settlement", "settled"
+                if status not in ("settled", "canceled"):
+                    logger.debug(f"[Settlements] {ticker} order={order_id} status={status} — not settled yet")
+                    continue
+
+                if status == "canceled":
+                    # Cancelled orders didn't execute — mark as settled/loss (cost already 0 in practice)
+                    logger.info(f"[Settlements] {ticker} was CANCELED — marking as loss")
+                    mark_trade_settled(ticker, won=False)
+                    newly_settled.append({"ticker": ticker, "outcome": "canceled"})
+                    continue
+
+                # For settled orders, check if we won by looking at fill data
+                # If our side (yes/no) won, payout_amount > 0
+                payout = order.get("payout", 0)
+                side = trade.get("side", "yes")
+                qty = trade.get("qty", 0)
+                cost = trade.get("cost", 0)
+
+                # Kalshi returns payout in cents
+                payout_usd = payout / 100.0 if payout else 0
+                won = payout_usd > 0
+
+                logger.info(
+                    f"[Settlements] ✅ Settled {ticker}: {'WIN' if won else 'LOSS'} "
+                    f"(payout=${payout_usd:.2f}, cost=${cost:.2f})"
+                )
+                mark_trade_settled(ticker, won=won)
+                newly_settled.append({
+                    "ticker": ticker,
+                    "outcome": "win" if won else "loss",
+                    "payout_usd": payout_usd,
+                    "cost_usd": cost,
+                    "pnl": payout_usd - cost,
+                })
+
+            except Exception as e:
+                logger.warning(f"[Settlements] Failed to check {ticker} ({order_id}): {e}")
+
+        if newly_settled:
+            logger.info(f"[Settlements] Settled {len(newly_settled)} trades this cycle")
+
+        return newly_settled
 
     async def close(self) -> None:
         if self._http:

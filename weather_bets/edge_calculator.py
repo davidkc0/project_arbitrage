@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import math
 
-from weather_bets.config import FORECAST_STDEV_24H, FORECAST_STDEV_48H, MIN_EDGE
+from weather_bets.config import FORECAST_STDEV_24H, FORECAST_STDEV_48H, MIN_EDGE, MARKET_CONVICTION_THRESHOLD
 from weather_bets.models import (
     EdgeOpportunity,
     ForecastData,
@@ -166,6 +166,12 @@ def calculate_spreads(
             f"profit=${profit_if_hit:.2f} EV=${expected_profit:.3f} ROI={roi:+.1f}%"
         )
 
+        # ── Market sanity check ──
+        passes, reason = market_sanity_check(spread_buckets, buckets, mean)
+        if not passes:
+            logger.warning(f"  [SANITY FAIL] {labels}: {reason}")
+            continue
+
         spread = SpreadBet(
             city=forecast.city,
             date=forecast.date,
@@ -213,6 +219,70 @@ def _spread_windows(
         windows.append(("4-bucket wide", [center - 2, center - 1, center, center + 1]))
 
     return windows
+
+
+def market_sanity_check(
+    spread_buckets: list[TemperatureBucket],
+    all_buckets: list[TemperatureBucket],
+    our_mean: float,
+) -> tuple[bool, str]:
+    """
+    Check whether the market is pricing an adjacent bucket so strongly
+    that we'd be fighting the tape by betting our spread.
+
+    Returns (passes, reason). If passes=False, skip the spread.
+
+    Logic: If any bucket NOT in our spread has a YES price above
+    MARKET_CONVICTION_THRESHOLD, the market is highly confident the
+    outcome will be there. We should only override this if our mean
+    forecast is solidly on the other side.
+    """
+    spread_tickers = {b.ticker for b in spread_buckets}
+
+    for b in all_buckets:
+        if b.ticker in spread_tickers:
+            continue  # This is a bucket we're betting on
+
+        if b.yes_price >= MARKET_CONVICTION_THRESHOLD:
+            # Market is very confident about this bucket. Check if our
+            # forecast mean is actually closer to our spread than to this bucket.
+            # Find the midpoint of the dominant bucket
+            if b.low_bound is not None and b.high_bound is not None:
+                bucket_mid = (b.low_bound + b.high_bound) / 2
+            elif b.low_bound is None and b.high_bound is not None:
+                bucket_mid = b.high_bound - 1
+            elif b.low_bound is not None and b.high_bound is None:
+                bucket_mid = b.low_bound + 1
+            else:
+                continue
+
+            # Find midpoint of our spread range
+            spread_lows = [b2.low_bound for b2 in spread_buckets if b2.low_bound is not None]
+            spread_highs = [b2.high_bound for b2 in spread_buckets if b2.high_bound is not None]
+            if not spread_lows or not spread_highs:
+                continue
+            spread_mid = (min(spread_lows) + max(spread_highs)) / 2
+
+            dist_to_dominant = abs(our_mean - bucket_mid)
+            dist_to_spread = abs(our_mean - spread_mid)
+
+            if dist_to_dominant < dist_to_spread:
+                reason = (
+                    f"Market prices {b.label} at ${b.yes_price:.2f} "
+                    f"({b.yes_price:.0%} confident) — our forecast ({our_mean}°F) "
+                    f"is actually closer to that bucket than our spread. "
+                    f"Skipping to avoid fighting the tape."
+                )
+                return False, reason
+
+            # Our forecast is clearly on our side, but market conviction is high —
+            # allow but warn
+            logger.warning(
+                f"[Sanity] Market strongly prices {b.label} @ ${b.yes_price:.2f} "
+                f"but our mean ({our_mean}°F) favors our spread — proceeding with caution"
+            )
+
+    return True, "ok"
 
 
 def _find_forecast_bucket(buckets: list[TemperatureBucket], temp: float) -> int | None:
