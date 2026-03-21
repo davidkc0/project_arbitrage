@@ -1,2 +1,4 @@
 # Trade data — don't commit to git
 *.json
+# Exception: forecast accuracy data is intentionally tracked
+!forecast_accuracy.json

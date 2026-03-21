@@ -12,6 +12,7 @@ from datetime import datetime
 import httpx
 
 from weather_bets.models import CityConfig
+from weather_bets.forecast_tracker import get_optimal_weights
 
 logger = logging.getLogger(__name__)
 
@@ -140,18 +141,36 @@ def build_consensus(
     nws_high: float,
     open_meteo_forecasts: list[dict],
     target_date: str,
+    days_out: int = 1,
 ) -> dict:
     """
-    Build a consensus forecast from multiple sources.
-    
-    Returns {consensus_high, nws_high, alt_high, spread, sources}
+    Build a consensus forecast from multiple sources using dynamic weights.
+
+    Weights are derived from historical forecast accuracy via forecast_tracker.
+    Falls back to equal weights when < 5 settled data points.
+
+    Returns {consensus_high, nws_high, alt_high, alt_avg, spread, sources, model_details}
     """
-    alt_temps = [
-        f["high_f"] for f in open_meteo_forecasts
-        if f.get("date") == target_date
+    model_details = [
+        f for f in open_meteo_forecasts if f.get("date") == target_date
     ]
 
-    if not alt_temps:
+    # Map model names to tracker source keys
+    # Open-Meteo model names: "GFS (NOAA)", "ICON (German)", "GEM (Canadian)"
+    model_name_map = {
+        "GFS (NOAA)": "gfs",
+        "ICON (German)": "icon",
+        "GEM (Canadian)": "gem",
+    }
+
+    # Extract per-model temps for this date
+    model_temps: dict[str, float] = {}
+    for f in model_details:
+        src_key = model_name_map.get(f.get("model", ""))
+        if src_key:
+            model_temps[src_key] = f["high_f"]
+
+    if not model_details:
         return {
             "consensus_high": nws_high,
             "nws_high": nws_high,
@@ -162,32 +181,46 @@ def build_consensus(
             "model_details": [],
         }
 
+    alt_temps = [f["high_f"] for f in model_details]
     alt_avg = sum(alt_temps) / len(alt_temps)
     all_temps = [nws_high] + alt_temps
     spread = max(all_temps) - min(all_temps)
 
-    # Weight NWS less when it disagrees with the model consensus.
-    # NWS historically runs hot; independent models (ICON, GEM) provide
-    # a useful check. When models agree and NWS is the outlier, lean
-    # toward models. Simple approach: 1 vote for NWS, 1 vote per model,
-    # but cap NWS contribution when spread is large.
-    if spread > 2.0 and abs(nws_high - alt_avg) > 1.5:
-        # NWS is an outlier — weight models more heavily (2:1 models vs NWS)
-        consensus = (nws_high + 2 * alt_avg) / 3
-        logger.info(
-            f"[Consensus] NWS outlier detected (spread={spread:.0f}°F) — "
-            f"weighting models 2:1 over NWS"
-        )
+    # Get dynamic weights from forecast_tracker
+    weights = get_optimal_weights(days_out)
+
+    # Compute weighted average — only include sources we actually have data for
+    weighted_sum = 0.0
+    weight_used = 0.0
+
+    if nws_high is not None:
+        weighted_sum += weights["nws"] * nws_high
+        weight_used += weights["nws"]
+
+    for src_key, temp in model_temps.items():
+        w = weights.get(src_key, 0.0)
+        weighted_sum += w * temp
+        weight_used += w
+
+    if weight_used > 0:
+        consensus = weighted_sum / weight_used
     else:
         consensus = sum(all_temps) / len(all_temps)
 
-    model_details = [
-        f for f in open_meteo_forecasts if f.get("date") == target_date
-    ]
+    # Log if NWS is an outlier (for awareness — no longer hard override)
+    if spread > 2.0 and abs(nws_high - alt_avg) > 1.5:
+        logger.info(
+            f"[Consensus] NWS outlier detected (NWS={nws_high}°F, models avg={alt_avg:.1f}°F, "
+            f"spread={spread:.1f}°F) — using dynamic weights "
+            f"(nws={weights['nws']:.2f}, gfs={weights['gfs']:.2f}, "
+            f"icon={weights['icon']:.2f}, gem={weights['gem']:.2f})"
+        )
 
     logger.info(
-        f"[Consensus] NWS={nws_high}°F, Alt avg={alt_avg:.0f}°F → "
-        f"Consensus={consensus:.0f}°F (spread={spread:.0f}°F)"
+        f"[Consensus] {days_out}d-out: NWS={nws_high}°F, Alt avg={alt_avg:.1f}°F → "
+        f"Consensus={consensus:.1f}°F (spread={spread:.1f}°F, "
+        f"weights: nws={weights['nws']:.2f} gfs={weights['gfs']:.2f} "
+        f"icon={weights['icon']:.2f} gem={weights['gem']:.2f})"
     )
 
     return {
@@ -198,4 +231,6 @@ def build_consensus(
         "spread": round(spread, 1),
         "sources": ["NWS"] + [f["model"] for f in model_details],
         "model_details": model_details,
+        "weights_used": weights,
+        "days_out": days_out,
     }

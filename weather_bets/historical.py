@@ -100,39 +100,16 @@ def analyze_forecast_bias(
     forecasts: list[dict],
 ) -> dict:
     """
-    Compare historical actuals vs forecasts to find NWS bias.
-    
-    Returns bias statistics:
-    - mean_error: average (forecast - actual), positive = NWS runs hot
-    - abs_error: average absolute error
-    - std_error: standard deviation of errors
+    DEPRECATED: This function had a bug — it compared today's forecast against
+    today's observation (same date), but forecasts are for *future* dates so
+    there's no meaningful overlap.
+
+    Use forecast_tracker.get_accuracy_stats() instead for accurate bias data.
+    This stub is retained for backward compatibility with the scan_state display.
+
+    Returns a zeroed-out stats dict with sample_size=0 to suppress stale bias output.
     """
-    if not historical or not forecasts:
-        return {"mean_error": 0, "abs_error": 2.5, "std_error": 3.0, "sample_size": 0}
-
-    errors = []
-    for fc in forecasts:
-        for hist in historical:
-            if fc.get("date") == hist.get("date"):
-                error = fc.get("high", 0) - hist.get("tmax", 0)
-                errors.append(error)
-
-    if not errors:
-        return {"mean_error": 0, "abs_error": 2.5, "std_error": 3.0, "sample_size": 0}
-
-    import statistics
-    mean_err = statistics.mean(errors)
-    abs_err = statistics.mean(abs(e) for e in errors)
-    std_err = statistics.stdev(errors) if len(errors) > 1 else 3.0
-
-    logger.info(
-        f"[Bias] NWS forecast bias: mean={mean_err:+.1f}°F "
-        f"MAE={abs_err:.1f}°F stdev={std_err:.1f}°F (n={len(errors)})"
+    logger.debug(
+        "[Bias] analyze_forecast_bias() is deprecated — use forecast_tracker.get_accuracy_stats()"
     )
-
-    return {
-        "mean_error": round(mean_err, 1),
-        "abs_error": round(abs_err, 1),
-        "std_error": round(std_err, 1),
-        "sample_size": len(errors),
-    }
+    return {"mean_error": 0.0, "abs_error": 0.0, "std_error": 0.0, "sample_size": 0}

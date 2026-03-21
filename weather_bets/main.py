@@ -21,6 +21,7 @@ from weather_bets.llm_analyst import analyze_spread
 from weather_bets.models import BetDecision, BetRecommendation, EdgeOpportunity, ForecastData
 from weather_bets.nws_forecast import fetch_forecast, fetch_hourly_forecast
 from weather_bets.open_meteo import fetch_multi_model_forecast, build_consensus
+from weather_bets.forecast_tracker import save_forecast, record_actual
 from weather_bets.price_watcher import PriceWatcher
 from weather_bets.position_manager import PositionManager
 from weather_bets.trade_log import (
@@ -90,6 +91,15 @@ async def run_scan_cycle():
                     current_observed_high = h["tmax"]
                     log(f"📡 Current observed high today: {current_observed_high}°F")
                     break
+
+            # Record actuals for past dates so forecast_tracker can settle them
+            for h in historical:
+                obs_date = h["date"]
+                if obs_date < today_str:  # only past dates have final actuals
+                    try:
+                        record_actual(obs_date, h["tmax"])
+                    except Exception as te:
+                        logger.warning(f"[Tracker] record_actual error for {obs_date}: {te}")
         except Exception as e:
             log(f"⚠️ Historical data error: {e}")
             historical = []
@@ -125,9 +135,34 @@ async def run_scan_cycle():
 
         # Step 5: For each upcoming day, build consensus and find spreads
         for i, fc in enumerate(forecasts[:3]):
+            days_out = i + 1  # i=0 → 1d out, i=1 → 2d out, etc.
+
             # Build consensus from NWS + Open-Meteo models
-            consensus = build_consensus(fc.high_temp_f, model_forecasts, fc.date)
+            consensus = build_consensus(fc.high_temp_f, model_forecasts, fc.date, days_out=days_out)
             scan_state["consensus"][fc.date] = consensus
+
+            # Save forecast for accuracy tracking
+            try:
+                model_name_map = {
+                    "GFS (NOAA)": "gfs",
+                    "ICON (German)": "icon",
+                    "GEM (Canadian)": "gem",
+                }
+                models_dict = {}
+                for mf in model_forecasts:
+                    if mf.get("date") == fc.date:
+                        src_key = model_name_map.get(mf.get("model", ""))
+                        if src_key:
+                            models_dict[src_key] = mf["high_f"]
+                save_forecast(
+                    target_date=fc.date,
+                    forecast_date=today_str,
+                    nws=fc.high_temp_f,
+                    models_dict=models_dict,
+                    days_out=days_out,
+                )
+            except Exception as te:
+                logger.warning(f"[Tracker] save_forecast error for {fc.date}: {te}")
 
             consensus_high = consensus["consensus_high"]
             nws_high = consensus["nws_high"]
@@ -164,7 +199,7 @@ async def run_scan_cycle():
                 log(f"  No Kalshi markets found for {fc.date}")
                 continue
 
-            days_ahead = i + 1
+            days_ahead = days_out  # same value, keep variable name for compatibility
 
             # Fetch hourly forecast early so we can use it for same-day calcs
             hourly = None
