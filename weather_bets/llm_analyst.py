@@ -110,14 +110,14 @@ async def analyze_spread(
 **All Market Buckets:**
 {all_buckets_summary}
 
-**Decision Framework — LEAN TOWARDS BETTING:**
-1. If expected profit is positive, DEFAULT to betting. We want volume.
-2. Only skip if there's a clear red flag (e.g., severe weather, obvious model disagreement, storm system that could shift temps dramatically).
-3. For spreads with 40%+ probability AND positive EV: BET.
-4. For spreads with 50%+ probability: almost always BET unless EV is barely positive and there's a weather concern.
-5. We are NOT looking for certainty — we are looking for +EV bets we can repeat daily across multiple cities.
-6. Scale bet size with confidence: high conviction = full ${BET_SIZE_USD}, moderate = ${BET_SIZE_USD * 0.5:.0f}-${BET_SIZE_USD:.0f}.
-7. **CRITICAL — respect the market:** If any bucket NOT in our spread is priced above $0.65, the market is very confident the outcome lands there. Only bet against high market conviction if our forecast firmly disagrees AND there's a clear reason (NWS bias, model disagreement). Never fight the tape without a good reason.
+**Decision Framework — BALANCED APPROACH:**
+1. Only bet when probability is 50%+ AND expected value is positive.
+2. NWS is the settlement source for Kalshi — if NWS forecast falls inside a different bucket than our spread, that's a WARNING. We need strong multi-model agreement to bet against NWS.
+3. For spreads with 55%+ probability AND positive EV AND NWS agreement: BET with confidence.
+4. For spreads where our consensus disagrees with NWS by 2°F+: be cautious. NWS may still be right.
+5. NEVER bet against the market AND NWS simultaneously — if both disagree with our spread, that's a SKIP.
+6. We'd rather miss a good bet than take a bad one. Capital preservation > volume.
+7. Scale bet size with confidence: high conviction = full ${BET_SIZE_USD}, moderate = ${BET_SIZE_USD * 0.5:.0f}.
 
 **CRITICAL — Directional integrity:**
 - If the hourly forecast shows a peak ABOVE our spread's upper bound, that is a SKIP. We should never bet "under X" if hourly says it'll exceed X.
@@ -195,8 +195,8 @@ Respond with a JSON object (no markdown, just raw JSON):
 
 
 def _fallback_spread(spread: SpreadBet) -> SpreadRecommendation:
-    """Fallback: bet if combined probability >= 35% and expected profit > 0."""
-    if spread.total_probability >= 0.35 and spread.expected_profit > 0:
+    """Fallback: bet if combined probability >= 50% and expected profit > 0."""
+    if spread.total_probability >= 0.50 and spread.expected_profit > 0:
         total_prob = sum(spread.bucket_probabilities)
         allocations = [
             BET_SIZE_USD * (p / total_prob) if total_prob > 0 else 0

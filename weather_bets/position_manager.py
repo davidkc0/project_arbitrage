@@ -195,14 +195,25 @@ class PositionManager:
             # If caller didn't specify, we'll use a taker-friendly limit (98¢ on a ≥96 market)
             # In practice Kalshi fills limit sells immediately at market price if within spread
             if yes_price_cents is None:
-                # Fetch current price from portfolio positions to set a reasonable limit
-                positions = await self.get_open_positions()
-                pos = next((p for p in positions if p["ticker"] == ticker), None)
-                if pos:
-                    # No direct price from positions API — use a wide limit (2¢ floor)
-                    yes_price_cents = 2  # worst-case: sell for 2¢ to guarantee fill
+                # Determine a reasonable sell price from trade log
+                # Don't fire-sale at 2¢ — use original cost minus small discount
+                trades = load_trades()
+                orig_trade = next(
+                    (t for t in reversed(trades) 
+                     if t.get("ticker") == ticker and not t.get("settled")),
+                    None,
+                )
+                if orig_trade and orig_trade.get("price"):
+                    # Sell at original price minus 5¢ for quick fill, min 5¢
+                    orig_cents = int(orig_trade["price"] * 100)
+                    yes_price_cents = max(5, orig_cents - 5)
+                    logger.info(
+                        f"[PositionManager] Sell price: {yes_price_cents}¢ "
+                        f"(original buy: {orig_cents}¢ minus 5¢ discount)"
+                    )
                 else:
-                    yes_price_cents = 2
+                    # No trade history — use 10¢ floor, not 2¢
+                    yes_price_cents = 10
 
             path = "/portfolio/orders"
             full_path = f"/trade-api/v2{path}"

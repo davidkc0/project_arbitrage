@@ -44,6 +44,13 @@ async def _fetch_nws_recent(city: CityConfig) -> list[dict]:
     Fetch recent observations from the NWS station.
     This gives us the last ~7 days of actual recorded temperatures
     which we can compare against forecasts.
+    
+    IMPORTANT accuracy notes:
+    - NWS API reports temperature as INTEGER Celsius
+    - We convert to Fahrenheit and ROUND to nearest whole degree,
+      matching NWS/Kalshi CLI report formatting
+    - Observations are grouped by LOCAL date (CDT/CST), not UTC
+    - Kalshi settles on the NWS CLI which uses local standard time
     """
     url = f"https://api.weather.gov/stations/{city.station_id}/observations"
 
@@ -57,8 +64,19 @@ async def _fetch_nws_recent(city: CityConfig) -> list[dict]:
 
     features = data.get("features", [])
 
-    # Group by date, find max temp per day
-    daily: dict[str, list[float]] = {}
+    # Timezone offset for this city (hours from UTC)
+    # Austin CDT = UTC-5, CST = UTC-6. Use CDT during DST.
+    tz_offsets = {
+        "KAUS": -5,  # CDT (March-November)
+        "KLAX": -7,  # PDT
+        "KORD": -5,  # CDT
+        "KMIA": -4,  # EDT
+        "KDEN": -6,  # MDT
+    }
+    tz_offset = timedelta(hours=tz_offsets.get(city.station_id, -5))
+
+    # Group by LOCAL date, find max/min temp per day
+    daily: dict[str, list[int]] = {}
     for obs in features:
         props = obs.get("properties", {})
         ts = props.get("timestamp", "")
@@ -69,11 +87,16 @@ async def _fetch_nws_recent(city: CityConfig) -> list[dict]:
 
         try:
             dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-            date_str = dt.strftime("%Y-%m-%d")
+            # Convert to local time for date grouping
+            local_dt = dt + tz_offset
+            date_str = local_dt.strftime("%Y-%m-%d")
         except (ValueError, TypeError):
             continue
 
-        temp_f = temp_c * 9 / 5 + 32
+        # Convert C→F and ROUND to nearest integer
+        # This matches NWS CLI report format (whole degrees F)
+        # 33°C → 91.4°F → 91°F (not 91.4)
+        temp_f = round(temp_c * 9 / 5 + 32)
         daily.setdefault(date_str, []).append(temp_f)
 
     results = []
@@ -81,8 +104,8 @@ async def _fetch_nws_recent(city: CityConfig) -> list[dict]:
         temps = daily[date_str]
         results.append({
             "date": date_str,
-            "tmax": round(max(temps), 1),
-            "tmin": round(min(temps), 1),
+            "tmax": max(temps),
+            "tmin": min(temps),
             "obs_count": len(temps),
         })
 
@@ -90,7 +113,7 @@ async def _fetch_nws_recent(city: CityConfig) -> list[dict]:
         f"[Historical] {city.name}: {len(results)} days of observations from {city.station_id}"
     )
     for r in results[-7:]:
-        logger.info(f"  {r['date']}: high={r['tmax']:.0f}°F low={r['tmin']:.0f}°F")
+        logger.info(f"  {r['date']}: high={r['tmax']}°F low={r['tmin']}°F")
 
     return results
 

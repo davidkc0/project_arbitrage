@@ -5,11 +5,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import uvicorn
 from fastapi import FastAPI
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pathlib import Path
 
 from weather_bets import config
@@ -32,6 +32,9 @@ from weather_bets.trade_log import (
     load_trades, save_trade, save_scan_result, get_trade_summary,
     get_open_tickers, already_bet_on,
 )
+from weather_bets.bet_engine import BetEngine
+from weather_bets.synoptic_poller import SynopticPoller
+from weather_bets.rounding_map import is_crossing_temp, get_bucket_label
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +58,24 @@ scan_state = {
 executor = WeatherExecutor()
 position_manager = PositionManager()
 price_watcher: PriceWatcher | None = None  # initialized in lifespan
+
+# ── Intraday System ─────────────────────────────────────────────────────
+bet_engine = BetEngine(
+    total_balance=100.0,
+    execution_mode=config.EXECUTION_MODE,
+)
+synoptic = SynopticPoller()
+
+intraday_state = {
+    "active": False,
+    "last_poll": None,
+    "latest_temp": None,
+    "trajectory": {},
+    "today_decisions": [],
+    "yes_bet_placed": False,
+    "no_bets_placed": False,
+    "daily_summary": {},
+}
 
 
 async def run_scan_cycle():
@@ -525,11 +546,12 @@ async def settlement_loop():
 
 
 async def scan_loop():
-    global price_watcher
+    # NOTE: PriceWatcher momentum trading DISABLED.
+    # In weather markets, price drops = forecast changed, not a buy signal.
+    # Re-enable after base strategy is proven profitable.
     await asyncio.sleep(2)
     await executor.initialize()
     await position_manager.initialize()
-    price_watcher = PriceWatcher(scan_state)
     while True:
         try:
             await run_scan_cycle()
@@ -539,30 +561,162 @@ async def scan_loop():
         await asyncio.sleep(config.SCAN_INTERVAL)
 
 
+# ── Intraday Loop (Synoptic + Bet Engine) ──────────────────────────────
+
+async def intraday_loop():
+    """Poll Synoptic for live temperature data and run the bet engine.
+
+    Runs every 60 seconds during trading hours (8 AM - 6 PM CDT).
+    At the right hour per month, evaluates YES and NO plays.
+    """
+    await asyncio.sleep(5)  # Let other services start first
+    logger.info("[Intraday] Starting intraday scan loop")
+
+    last_date = ""
+
+    while True:
+        try:
+            # Get current time in CDT (UTC - 5)
+            now_utc = datetime.now(timezone.utc)
+            now_cdt = now_utc - timedelta(hours=5)
+            today_str = now_cdt.strftime("%Y-%m-%d")
+            hour = now_cdt.hour
+            minute = now_cdt.minute
+
+            # Reset daily state at midnight
+            if today_str != last_date:
+                logger.info(f"[Intraday] New day: {today_str}")
+                bet_engine.reset_daily(today_str)
+                synoptic.reset_daily()
+                last_date = today_str
+                intraday_state["active"] = False
+                intraday_state["today_decisions"] = []
+                intraday_state["yes_bet_placed"] = False
+                intraday_state["no_bets_placed"] = False
+
+            # Only poll during daytime hours (8 AM - 6 PM CDT)
+            if hour < 8 or hour >= 18:
+                await asyncio.sleep(60)
+                continue
+
+            intraday_state["active"] = True
+
+            # ── Poll Synoptic ──
+            reading = await synoptic.poll_once()
+            if reading:
+                intraday_state["last_poll"] = reading["timestamp_cdt"]
+                intraday_state["latest_temp"] = reading["temp_f"]
+                intraday_state["trajectory"] = synoptic.get_trajectory()
+
+            # ── Run bet engine at noon+ ──
+            if reading and hour >= 12:
+                current_temp = reading["temp_f_int"]
+                month = now_cdt.month
+
+                # Determine sky cover from NWS forecast (rough)
+                sky_cover = "CLR"  # Default; will be refined when NWS data is integrated
+                if scan_state.get("forecasts"):
+                    latest_fc = scan_state["forecasts"][0]
+                    detail = latest_fc.get("detail", "").lower()
+                    if "cloud" in detail or "overcast" in detail:
+                        sky_cover = "BKN"
+                    elif "partly" in detail or "mostly" in detail:
+                        sky_cover = "SCT"
+
+                # Fetch live Kalshi bucket data
+                city = config.CITIES.get("AUS")
+                if city:
+                    try:
+                        buckets = await fetch_weather_markets(city, target_date=today_str)
+                        bucket_dicts = [
+                            {
+                                "ticker": b.ticker,
+                                "label": b.label,
+                                "low_bound": b.low_bound,
+                                "high_bound": b.high_bound,
+                                "yes_price": b.yes_price,
+                                "no_price": b.no_price,
+                                "volume": b.volume,
+                            }
+                            for b in buckets
+                        ]
+                    except Exception as e:
+                        logger.warning(f"[Intraday] Kalshi fetch error: {e}")
+                        bucket_dicts = []
+
+                    if bucket_dicts:
+                        # ── Play 1: YES prediction ──
+                        if not bet_engine.yes_bet_placed_today:
+                            yes_decision = bet_engine.evaluate_yes_play(
+                                current_temp=current_temp,
+                                current_hour=hour,
+                                month=month,
+                                sky_cover=sky_cover,
+                                buckets=bucket_dicts,
+                            )
+                            bet_engine.log_decision(yes_decision)
+                            intraday_state["today_decisions"].append(yes_decision)
+
+                            if yes_decision["action"] == "bet":
+                                bet_engine.yes_bet_placed_today = True
+                                intraday_state["yes_bet_placed"] = True
+                                logger.info(
+                                    f"[Intraday] 🎯 YES BET: {yes_decision['bucket']} "
+                                    f"@ {yes_decision['price']:.2f} x{yes_decision['contracts']}"
+                                )
+                                # In dry mode, just log. In live mode, would place via executor.
+
+                        # ── Play 2: NO base income ──
+                        if not bet_engine.no_bets_placed_today:
+                            no_decisions = bet_engine.evaluate_no_plays(
+                                current_temp=current_temp,
+                                current_hour=hour,
+                                month=month,
+                                sky_cover=sky_cover,
+                                buckets=bucket_dicts,
+                            )
+                            for nd in no_decisions:
+                                bet_engine.log_decision(nd)
+                                intraday_state["today_decisions"].append(nd)
+
+                            active_nos = [d for d in no_decisions if d.get("action") == "bet"]
+                            if active_nos:
+                                bet_engine.no_bets_placed_today = True
+                                intraday_state["no_bets_placed"] = True
+                                total_cost = sum(d.get("cost", 0) for d in active_nos)
+                                logger.info(
+                                    f"[Intraday] 💰 NO BETS: {len(active_nos)} buckets, "
+                                    f"${total_cost:.2f} total"
+                                )
+
+                        intraday_state["daily_summary"] = bet_engine.get_daily_summary()
+
+                # Log rounding crossings
+                if reading and is_crossing_temp(reading["temp_f_int"]):
+                    logger.warning(
+                        f"[Intraday] ⚠️ ROUNDING CROSSING: {reading['temp_f_int']}°F "
+                        f"({reading['temp_c']}°C) — bucket may be ambiguous"
+                    )
+
+        except Exception as e:
+            logger.error(f"[Intraday] Error: {e}", exc_info=True)
+
+        await asyncio.sleep(60)  # Poll every 60 seconds
+
+
 # ── FastAPI Server ──────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    async def _price_watch_delayed():
-        """Wait until price_watcher is initialized by scan_loop, then start it."""
-        for _ in range(60):  # wait up to 60s
-            await asyncio.sleep(1)
-            if price_watcher is not None:
-                break
-        if price_watcher is not None:
-            await price_watcher.start()
-        else:
-            logger.warning("[Lifespan] price_watcher never initialized")
-
     scan_task = asyncio.create_task(scan_loop())
-    price_watch_task = asyncio.create_task(_price_watch_delayed())
-    momentum_task = asyncio.create_task(momentum_loop())
     settlement_task = asyncio.create_task(settlement_loop())
+    intraday_task = asyncio.create_task(intraday_loop())
+    # PriceWatcher + momentum loop DISABLED — see scan_loop comment
     yield
     scan_task.cancel()
-    price_watch_task.cancel()
-    momentum_task.cancel()
     settlement_task.cancel()
+    intraday_task.cancel()
+    bet_engine.save_session_log()
     await executor.close()
     await position_manager.close()
 
@@ -631,6 +785,31 @@ async def reject_bet(ticker: str):
     queue_file.write_text(_json.dumps(queue, indent=2))
     logger.info(f"[Semi-auto] Bet rejected by DC: {ticker}")
     return {"status": "rejected", "ticker": ticker}
+
+@app.get("/api/intraday")
+async def get_intraday():
+    """Expose intraday bet engine state."""
+    return {
+        "active": intraday_state["active"],
+        "last_poll": intraday_state["last_poll"],
+        "latest_temp": intraday_state["latest_temp"],
+        "trajectory": intraday_state["trajectory"],
+        "yes_bet_placed": intraday_state["yes_bet_placed"],
+        "no_bets_placed": intraday_state["no_bets_placed"],
+        "daily_summary": intraday_state["daily_summary"],
+        "decisions_today": len(intraday_state["today_decisions"]),
+        "bet_decisions": [
+            d for d in intraday_state["today_decisions"]
+            if d.get("action") == "bet"
+        ],
+        "engine_balance": bet_engine.total_balance,
+        "execution_mode": bet_engine.execution_mode,
+    }
+
+@app.get("/api/intraday/decisions")
+async def get_intraday_decisions():
+    """All decisions made by the bet engine today."""
+    return {"decisions": intraday_state["today_decisions"]}
 
 @app.get("/{filename}")
 async def serve_static(filename: str):

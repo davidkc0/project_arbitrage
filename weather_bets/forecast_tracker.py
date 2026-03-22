@@ -162,10 +162,13 @@ def get_optimal_weights(days_out: int = 1) -> dict:
     """
     Return optimal weights for each source based on historical MAE.
 
-    Falls back to equal weights (0.25 each) if < 5 settled data points.
-    Weights inversely proportional to MAE as data accumulates.
+    Falls back to NWS-heavy weights if < 10 settled data points.
+    Kalshi settles on NWS, so NWS gets 40% default weight.
+    Weights become data-driven (inversely proportional to MAE) as data accumulates.
     """
-    equal_weights = {"nws": 0.25, "gfs": 0.25, "icon": 0.25, "gem": 0.25}
+    # NWS-heavy defaults: Kalshi settles on NWS data, so NWS deserves more weight
+    # until we have enough data to prove another model is more accurate
+    default_weights = {"nws": 0.40, "gfs": 0.20, "icon": 0.20, "gem": 0.20}
     sources = ["nws", "gfs", "icon", "gem"]
 
     stats = get_accuracy_stats()
@@ -173,9 +176,9 @@ def get_optimal_weights(days_out: int = 1) -> dict:
     s = stats.get(key, {})
     n = s.get("n", 0)
 
-    if n < 5:
-        logger.debug(f"[Tracker] Only {n} settled points for {days_out}d-out — using equal weights")
-        return equal_weights
+    if n < 10:
+        logger.debug(f"[Tracker] Only {n} settled points for {days_out}d-out — using NWS-heavy defaults")
+        return default_weights
 
     maes = {}
     for src in sources:

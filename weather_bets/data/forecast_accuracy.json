@@ -10,24 +10,31 @@
     "forecasts": {
       "2026-03-21": {
         "nws": 93,
-        "gfs": 90.4,
-        "icon": 90.9,
-        "gem": 92.8,
+        "gfs": 91.4,
+        "icon": 91.8,
+        "gem": 92.7,
         "days_out": 1
       }
     },
-    "actual_high": null,
-    "settled": false
+    "actual_high": 93,
+    "settled": true
   },
   {
     "target_date": "2026-03-22",
     "forecasts": {
       "2026-03-21": {
-        "nws": 94,
-        "gfs": 89.9,
-        "icon": 91.1,
-        "gem": 92.3,
-        "days_out": 2
+        "nws": 92,
+        "gfs": 90.0,
+        "icon": 91.3,
+        "gem": 91.7,
+        "days_out": 1
+      },
+      "2026-03-22": {
+        "nws": 92,
+        "gfs": 90.0,
+        "icon": 91.3,
+        "gem": 91.7,
+        "days_out": 1
       }
     },
     "actual_high": null,
@@ -37,10 +44,38 @@
     "target_date": "2026-03-23",
     "forecasts": {
       "2026-03-21": {
-        "nws": 88,
+        "nws": 89,
         "gfs": 87.8,
-        "icon": 87.5,
-        "gem": 89.6,
+        "icon": 87.2,
+        "gem": 88.7,
+        "days_out": 2
+      },
+      "2026-03-22": {
+        "nws": 89,
+        "gfs": 87.4,
+        "icon": 87.2,
+        "gem": 88.7,
+        "days_out": 2
+      }
+    },
+    "actual_high": null,
+    "settled": false
+  },
+  {
+    "target_date": "2026-03-24",
+    "forecasts": {
+      "2026-03-21": {
+        "nws": 89,
+        "gfs": 88.0,
+        "icon": 86.5,
+        "gem": 89.2,
+        "days_out": 3
+      },
+      "2026-03-22": {
+        "nws": 89,
+        "gfs": 87.3,
+        "icon": 86.5,
+        "gem": 89.2,
         "days_out": 3
       }
     },
