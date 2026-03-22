@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.projectarbitrage.weatherbets</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Volumes/1TB SSD/project_arbitrage/start_weather.sh</string>
+    </array>
+
+    <!-- Start automatically at login -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Restart if it crashes -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Wait 10 seconds before restarting after crash -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!-- Log stdout/stderr -->
+    <key>StandardOutPath</key>
+    <string>/Volumes/1TB SSD/project_arbitrage/weather_bets/data/launchd_stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Volumes/1TB SSD/project_arbitrage/weather_bets/data/launchd_stderr.log</string>
+
+    <!-- Set working directory -->
+    <key>WorkingDirectory</key>
+    <string>/Volumes/1TB SSD/project_arbitrage</string>
+</dict>
+</plist>

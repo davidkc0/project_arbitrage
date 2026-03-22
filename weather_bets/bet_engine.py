@@ -1,7 +1,8 @@
-"""Dual-strategy bet decision engine for Kalshi temperature markets.
+"""Triple-strategy bet decision engine for Kalshi temperature markets.
 
 Play 1 (YES): Predict which bucket the daily high lands in → buy YES
 Play 2 (NO):  Identify dead/overpriced buckets → buy NO for base income
+Play 3 (FAV): Buy YES on market favorite when priced 50-65¢ (historical sweet spot)
 
 Uses:
 - intraday_predictor for temperature trajectory prediction
@@ -65,10 +66,11 @@ EARLIEST_BET_HOUR = {
 
 
 class BetEngine:
-    """Dual-strategy bet decision engine.
+    """Triple-strategy bet decision engine.
 
     Play 1 (YES): When CI is tight enough, predict the bucket and buy YES.
     Play 2 (NO):  Buy NO on dead/overpriced buckets for daily base income.
+    Play 3 (FAV): Buy YES on market favorite priced 50-65¢ (historical sweet spot).
     """
 
     def __init__(
@@ -86,6 +88,7 @@ class BetEngine:
         # Daily state
         self.yes_bet_placed_today = False
         self.no_bets_placed_today = False
+        self.favorite_bet_placed_today = False
         self.today_date: str = ""
 
         # Session log
@@ -104,6 +107,7 @@ class BetEngine:
         self.today_date = today
         self.yes_bet_placed_today = False
         self.no_bets_placed_today = False
+        self.favorite_bet_placed_today = False
 
     # ── Play 1: YES prediction ──────────────────────────────────────
 
@@ -372,6 +376,201 @@ class BetEngine:
 
         return decisions
 
+    # ── Play 3: Market Favorite (Sweet Spot, Month-Aware) ──────────
+
+    # Month → confidence tier based on remaining-rise std dev after noon
+    # A = tight (std ≤ 2.0°F), B = moderate (≤ 2.8°F), C = wide (> 2.8°F)
+    MONTH_TIER = {
+        1: "B",  2: "C",  3: "C",  4: "B",  5: "C",  6: "B",
+        7: "A",  8: "A",  9: "A", 10: "A", 11: "B", 12: "C",
+    }
+
+    # Tier → earliest evaluation hour and position sizing
+    TIER_CONFIG = {
+        "A": {"earliest_hour": 10, "size_pct": 0.30, "max_distance": 3},
+        "B": {"earliest_hour": 11, "size_pct": 0.25, "max_distance": 4},
+        "C": {"earliest_hour": 12, "size_pct": 0.20, "max_distance": 5},
+    }
+
+    def evaluate_favorite_play(
+        self,
+        current_temp: int,
+        current_hour: int,
+        month: int,
+        sky_cover: str,
+        buckets: list[dict],
+        day_max: int | None = None,
+    ) -> dict:
+        """Buy YES on the market favorite when priced in the 45-68¢ sweet spot.
+
+        Uses CLEAR_DAY_PATTERNS for hour-specific remaining rise prediction.
+        High-confidence months (Jul-Oct) start at 10 AM; low-confidence (Mar, May,
+        Dec) wait until noon.
+
+        Based on analysis of 6,249 settled KXHIGHAUS markets:
+        - At $0.50 YES, buckets win 57% (+7% edge, +15% ROI)
+        - At $0.65 YES, buckets win 78% (+13% edge, +20% ROI)
+        """
+        decision = {
+            "play": "FAV",
+            "action": "skip",
+            "reasoning": "",
+            "ticker": None,
+            "side": "yes",
+            "bucket": None,
+            "price": 0,
+            "contracts": 0,
+            "cost": 0,
+        }
+
+        if self.favorite_bet_placed_today:
+            decision["reasoning"] = "Skip: FAV bet already placed today"
+            return decision
+
+        # Get month confidence tier
+        tier = self.MONTH_TIER.get(month, "C")
+        tier_cfg = self.TIER_CONFIG[tier]
+        earliest = tier_cfg["earliest_hour"]
+        size_pct = tier_cfg["size_pct"]
+        max_dist = tier_cfg["max_distance"]
+
+        if current_hour < earliest:
+            decision["reasoning"] = (
+                f"Skip: {current_hour}:00 < {earliest}:00 "
+                f"(tier {tier} for month {month})"
+            )
+            return decision
+
+        # ── Predict daily high using hour-specific remaining rise ──
+        pattern = CLEAR_DAY_PATTERNS.get(month, {}).get(current_hour)
+        if not pattern:
+            decision["reasoning"] = (
+                f"Skip: no pattern data for month={month} hour={current_hour}"
+            )
+            return decision
+
+        avg_rise, p10_rise, p90_rise, n_samples = pattern
+        predicted_high = round(current_temp + avg_rise)
+        pred_low = current_temp + p10_rise
+        pred_high_bound = current_temp + p90_rise
+
+        # Use day_max from Synoptic as a floor (high can't be below what we've seen)
+        if day_max and day_max > predicted_high:
+            predicted_high = day_max
+
+        # Prediction confidence: how many buckets does the range span?
+        pred_range = pred_high_bound - pred_low
+
+        # Find buckets in the sweet spot price range
+        sweet_spot_min = 0.45
+        sweet_spot_max = 0.68
+        candidates = []
+
+        for bkt in buckets:
+            yes_price = bkt.get("yes_price", 0)
+            if sweet_spot_min <= yes_price <= sweet_spot_max:
+                candidates.append(bkt)
+
+        if not candidates:
+            prices_str = ", ".join(
+                f"{b.get('label','?')}={b.get('yes_price',0):.2f}" for b in buckets
+            )
+            decision["reasoning"] = (
+                f"Skip: no buckets in sweet spot "
+                f"(${sweet_spot_min:.2f}-${sweet_spot_max:.2f}). "
+                f"Predicted high: {predicted_high}°F (range {pred_low}-{pred_high_bound}°F, "
+                f"tier {tier}). Prices: [{prices_str}]"
+            )
+            return decision
+
+        # Score candidates: does our prediction agree with this bucket?
+        best = None
+        best_score = -999
+
+        for bkt in candidates:
+            low_bound = bkt.get("low_bound", 0)
+            high_bound = bkt.get("high_bound", 999)
+            yes_price = bkt.get("yes_price", 0)
+            bucket_mid = (low_bound + high_bound) / 2
+
+            # Does our trajectory predict this bucket?
+            pred_score = 0
+            if low_bound <= predicted_high <= high_bound:
+                pred_score = 8  # Strong: predicted high falls in this bucket
+            elif pred_low <= high_bound and pred_high_bound >= low_bound:
+                pred_score = 4  # Prediction range overlaps this bucket
+            elif abs(predicted_high - bucket_mid) <= max_dist:
+                pred_score = 1  # Within max allowed distance
+            else:
+                pred_score = -5  # Disagree
+
+            # Price attractiveness: prefer lower price within sweet spot
+            price_score = (sweet_spot_max - yes_price) * 5
+
+            total_score = pred_score + price_score
+
+            if total_score > best_score:
+                best_score = total_score
+                best = bkt
+
+        if best is None or best_score < 0:
+            decision["reasoning"] = (
+                f"Skip: no candidate agrees with prediction "
+                f"({predicted_high}°F, range {pred_low}-{pred_high_bound}°F, tier {tier})"
+            )
+            return decision
+
+        yes_price = best.get("yes_price", 0)
+        low_bound = best.get("low_bound", 0)
+        high_bound = best.get("high_bound", 999)
+        bucket_mid = (low_bound + high_bound) / 2
+        distance = abs(predicted_high - bucket_mid)
+
+        # Final distance check
+        if distance > max_dist:
+            decision["reasoning"] = (
+                f"Skip: FAV {best.get('label','?')} at ${yes_price:.2f} is "
+                f"{distance:.0f}°F from prediction ({predicted_high}°F), "
+                f"max allowed: {max_dist}°F for tier {tier}"
+            )
+            return decision
+
+        # Size: tier-dependent %, boost if prediction range is narrow (≤ 4°F)
+        effective_pct = size_pct
+        if pred_range <= 4:
+            effective_pct = min(size_pct * 1.25, 0.35)  # 25% boost, cap at 35%
+
+        bet_amount = self.yes_pool * effective_pct
+        contracts = int(bet_amount / yes_price)
+
+        if contracts < 1:
+            decision["reasoning"] = "Skip: insufficient funds for 1 FAV contract"
+            return decision
+
+        cost = contracts * yes_price
+        narrow_str = " 🎯 NARROW" if pred_range <= 4 else ""
+
+        decision.update({
+            "action": "bet",
+            "reasoning": (
+                f"FAV: {best.get('label', '???')} at ${yes_price:.2f} "
+                f"| pred={predicted_high}°F (range {pred_low}-{pred_high_bound}°F)"
+                f"{narrow_str} "
+                f"| tier {tier}, {contracts}x, ${cost:.2f}"
+            ),
+            "ticker": best.get("ticker"),
+            "bucket": best.get("label"),
+            "price": yes_price,
+            "contracts": contracts,
+            "cost": round(cost, 2),
+            "predicted_high": predicted_high,
+            "pred_range": f"{pred_low}-{pred_high_bound}",
+            "confidence_tier": tier,
+            "sweet_spot_edge": "+7-13% historical",
+        })
+
+        return decision
+
     # ── Logging ───────────────────────────────────────────────────
 
     def log_decision(self, decision: dict):
@@ -421,6 +620,7 @@ class BetEngine:
 
         yes_bets = [d for d in bets if d.get("play") == "YES"]
         no_bets = [d for d in bets if d.get("play", "").startswith("NO")]
+        fav_bets = [d for d in bets if d.get("play") == "FAV"]
 
         total_cost = sum(d.get("cost", 0) for d in bets)
         total_contracts = sum(d.get("contracts", 0) for d in bets)
@@ -431,6 +631,7 @@ class BetEngine:
             "total_skips": len(skips),
             "yes_bets": len(yes_bets),
             "no_bets": len(no_bets),
+            "fav_bets": len(fav_bets),
             "total_cost": round(total_cost, 2),
             "total_contracts": total_contracts,
             "balance_remaining": round(self.total_balance - total_cost, 2),

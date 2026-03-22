@@ -74,6 +74,7 @@ intraday_state = {
     "today_decisions": [],
     "yes_bet_placed": False,
     "no_bets_placed": False,
+    "favorite_bet_placed": False,
     "daily_summary": {},
 }
 
@@ -593,6 +594,7 @@ async def intraday_loop():
                 intraday_state["today_decisions"] = []
                 intraday_state["yes_bet_placed"] = False
                 intraday_state["no_bets_placed"] = False
+                intraday_state["favorite_bet_placed"] = False
 
             # Only poll during daytime hours (8 AM - 6 PM CDT)
             if hour < 8 or hour >= 18:
@@ -608,8 +610,8 @@ async def intraday_loop():
                 intraday_state["latest_temp"] = reading["temp_f"]
                 intraday_state["trajectory"] = synoptic.get_trajectory()
 
-            # ── Run bet engine at noon+ ──
-            if reading and hour >= 12:
+            # ── Run bet engine from 10 AM+ (Play 3 may start at 10 in tier A months) ──
+            if reading and hour >= 10:
                 current_temp = reading["temp_f_int"]
                 month = now_cdt.month
 
@@ -687,6 +689,30 @@ async def intraday_loop():
                                 logger.info(
                                     f"[Intraday] 💰 NO BETS: {len(active_nos)} buckets, "
                                     f"${total_cost:.2f} total"
+                                )
+
+                        intraday_state["daily_summary"] = bet_engine.get_daily_summary()
+
+                        # ── Play 3: Market Favorite (Sweet Spot) ──
+                        if not bet_engine.favorite_bet_placed_today:
+                            fav_decision = bet_engine.evaluate_favorite_play(
+                                current_temp=current_temp,
+                                current_hour=hour,
+                                month=month,
+                                sky_cover=sky_cover,
+                                buckets=bucket_dicts,
+                                day_max=synoptic.get_trajectory().get("day_max"),
+                            )
+                            bet_engine.log_decision(fav_decision)
+                            intraday_state["today_decisions"].append(fav_decision)
+
+                            if fav_decision["action"] == "bet":
+                                bet_engine.favorite_bet_placed_today = True
+                                intraday_state["favorite_bet_placed"] = True
+                                logger.info(
+                                    f"[Intraday] ⭐ FAV BET: {fav_decision['bucket']} "
+                                    f"@ {fav_decision['price']:.2f} x{fav_decision['contracts']} "
+                                    f"({fav_decision.get('sweet_spot_edge', '')})"
                                 )
 
                         intraday_state["daily_summary"] = bet_engine.get_daily_summary()
@@ -796,6 +822,7 @@ async def get_intraday():
         "trajectory": intraday_state["trajectory"],
         "yes_bet_placed": intraday_state["yes_bet_placed"],
         "no_bets_placed": intraday_state["no_bets_placed"],
+        "favorite_bet_placed": intraday_state["favorite_bet_placed"],
         "daily_summary": intraday_state["daily_summary"],
         "decisions_today": len(intraday_state["today_decisions"]),
         "bet_decisions": [
