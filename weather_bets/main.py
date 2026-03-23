@@ -34,6 +34,7 @@ from weather_bets.trade_log import (
 )
 from weather_bets.bet_engine import BetEngine
 from weather_bets.synoptic_poller import SynopticPoller
+from weather_bets.iem_poller import IEMPoller
 from weather_bets.rounding_map import is_crossing_temp, get_bucket_label
 
 logger = logging.getLogger(__name__)
@@ -61,16 +62,19 @@ price_watcher: PriceWatcher | None = None  # initialized in lifespan
 
 # ── Intraday System ─────────────────────────────────────────────────────
 bet_engine = BetEngine(
-    total_balance=100.0,
+    total_balance=35.91,
     execution_mode=config.EXECUTION_MODE,
 )
 synoptic = SynopticPoller()
+iem = IEMPoller(station="AUS", network="TX_ASOS")
 
 intraday_state = {
     "active": False,
     "last_poll": None,
     "latest_temp": None,
     "trajectory": {},
+    "iem_high": None,
+    "iem_source": "IEM_DSM",
     "today_decisions": [],
     "yes_bet_placed": False,
     "no_bets_placed": False,
@@ -609,6 +613,20 @@ async def intraday_loop():
                 intraday_state["last_poll"] = reading["timestamp_cdt"]
                 intraday_state["latest_temp"] = reading["temp_f"]
                 intraday_state["trajectory"] = synoptic.get_trajectory()
+
+            # ── Poll IEM DSM (settlement source) ──
+            iem_data = await iem.poll_once(today_str)
+            if iem_data:
+                intraday_state["iem_high"] = iem_data["max_tmpf_int"]
+                # Log discrepancy between Synoptic and IEM
+                syn_max = synoptic.get_trajectory().get("day_max")
+                iem_high = iem_data["max_tmpf_int"]
+                if syn_max and iem_high and abs(syn_max - iem_high) >= 2:
+                    logger.warning(
+                        "[Intraday] ⚠️ DATA DISCREPANCY: Synoptic max=%d°F vs IEM DSM=%d°F "
+                        "(IEM is settlement source)",
+                        syn_max, iem_high,
+                    )
 
             # ── Run bet engine from 10 AM+ (Play 3 may start at 10 in tier A months) ──
             if reading and hour >= 10:

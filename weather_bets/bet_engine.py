@@ -462,7 +462,7 @@ class BetEngine:
         pred_range = pred_high_bound - pred_low
 
         # Find buckets in the sweet spot price range
-        sweet_spot_min = 0.45
+        sweet_spot_min = 0.60
         sweet_spot_max = 0.68
         candidates = []
 

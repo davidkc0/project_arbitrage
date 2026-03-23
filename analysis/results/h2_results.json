@@ -1,0 +1,95 @@
+{
+  "n_markets": 5819,
+  "n_events": 1042,
+  "analysis_c_bins": [
+    {
+      "bin_midpoint": 0.05,
+      "high_vol_n": 1200,
+      "high_vol_win_rate": 0.0017,
+      "low_vol_n": 3133,
+      "low_vol_win_rate": 0.0038,
+      "diff": -0.0022,
+      "z_score": -1.123,
+      "p_value": 0.869277,
+      "significant": false
+    },
+    {
+      "bin_midpoint": 0.15,
+      "high_vol_n": 64,
+      "high_vol_win_rate": 0.1406,
+      "low_vol_n": 171,
+      "low_vol_win_rate": 0.0643,
+      "diff": 0.0763,
+      "z_score": 1.866,
+      "p_value": 0.031025,
+      "significant": true
+    },
+    {
+      "bin_midpoint": 0.25,
+      "high_vol_n": 57,
+      "high_vol_win_rate": 0.2807,
+      "low_vol_n": 79,
+      "low_vol_win_rate": 0.1139,
+      "diff": 0.1668,
+      "z_score": 2.478,
+      "p_value": 0.006614,
+      "significant": true
+    },
+    {
+      "bin_midpoint": 0.35,
+      "high_vol_n": 31,
+      "high_vol_win_rate": 0.3548,
+      "low_vol_n": 42,
+      "low_vol_win_rate": 0.2857,
+      "diff": 0.0691,
+      "z_score": 0.628,
+      "p_value": 0.264865,
+      "significant": false
+    },
+    {
+      "bin_midpoint": 0.45,
+      "high_vol_n": 36,
+      "high_vol_win_rate": 0.4722,
+      "low_vol_n": 29,
+      "low_vol_win_rate": 0.4483,
+      "diff": 0.0239,
+      "z_score": 0.193,
+      "p_value": 0.423672,
+      "significant": false
+    },
+    {
+      "bin_midpoint": 0.55,
+      "high_vol_n": 39,
+      "high_vol_win_rate": 0.5897,
+      "low_vol_n": 48,
+      "low_vol_win_rate": 0.5208,
+      "diff": 0.0689,
+      "z_score": 0.643,
+      "p_value": 0.260192,
+      "significant": false
+    },
+    {
+      "bin_midpoint": 0.65,
+      "high_vol_n": 12,
+      "high_vol_win_rate": 0.8333,
+      "low_vol_n": 17,
+      "low_vol_win_rate": 0.7059,
+      "diff": 0.1275,
+      "z_score": 0.79,
+      "p_value": 0.21478,
+      "significant": false
+    },
+    {
+      "bin_midpoint": 0.95,
+      "high_vol_n": 626,
+      "high_vol_win_rate": 0.9936,
+      "low_vol_n": 210,
+      "low_vol_win_rate": 0.981,
+      "diff": 0.0127,
+      "z_score": 1.63,
+      "p_value": 0.051506,
+      "significant": false
+    }
+  ],
+  "significant_bins": 2
+}

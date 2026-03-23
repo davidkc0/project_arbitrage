@@ -1,0 +1,59 @@
+{
+  "overlap_dates": 1035,
+  "results_by_threshold": [
+    {
+      "threshold": 0.0,
+      "total_trades": 8754,
+      "total_wins": 46,
+      "total_win_rate": 0.0053,
+      "total_pnl": -84.34,
+      "total_cost": 130.34,
+      "total_roi": -0.6471
+    },
+    {
+      "threshold": 0.05,
+      "total_trades": 6721,
+      "total_wins": 39,
+      "total_win_rate": 0.0058,
+      "total_pnl": -59.26,
+      "total_cost": 98.26,
+      "total_roi": -0.6031
+    },
+    {
+      "threshold": 0.1,
+      "total_trades": 5367,
+      "total_wins": 31,
+      "total_win_rate": 0.0058,
+      "total_pnl": -45.08,
+      "total_cost": 76.08,
+      "total_roi": -0.5925
+    },
+    {
+      "threshold": 0.15,
+      "total_trades": 4159,
+      "total_wins": 21,
+      "total_win_rate": 0.005,
+      "total_pnl": -33.96,
+      "total_cost": 54.96,
+      "total_roi": -0.6179
+    },
+    {
+      "threshold": 0.2,
+      "total_trades": 2952,
+      "total_wins": 17,
+      "total_win_rate": 0.0058,
+      "total_pnl": -21.66,
+      "total_cost": 38.66,
+      "total_roi": -0.5603
+    },
+    {
+      "threshold": 0.25,
+      "total_trades": 1832,
+      "total_wins": 14,
+      "total_win_rate": 0.0076,
+      "total_pnl": -9.99,
+      "total_cost": 23.99,
+      "total_roi": -0.4164
+    }
+  ]
+}

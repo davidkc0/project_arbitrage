@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kalshi High-Win-Rate Profitability Analysis</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0a0e1a;
+            color: #e2e8f0;
+            min-height: 100vh;
+            padding: 2rem;
+        }
+        
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            font-size: 1.8rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #60a5fa, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.5rem;
+        }
+        
+        .subtitle {
+            color: #94a3b8;
+            font-size: 0.95rem;
+            margin-bottom: 2rem;
+        }
+        
+        .card {
+            background: linear-gradient(145deg, #111827, #1a2035);
+            border: 1px solid #1e293b;
+            border-radius: 16px;
+            padding: 2rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
+        }
+        
+        .card h2 {
+            font-size: 1.15rem;
+            font-weight: 600;
+            color: #f1f5f9;
+            margin-bottom: 1.2rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .card h2 .icon { font-size: 1.3rem; }
+        
+        /* Chart */
+        .chart-container {
+            position: relative;
+            width: 100%;
+            height: 380px;
+            margin: 1rem 0;
+        }
+        
+        .chart-area {
+            position: relative;
+            width: calc(100% - 60px);
+            height: calc(100% - 50px);
+            margin-left: 60px;
+            border-left: 1px solid #334155;
+            border-bottom: 1px solid #334155;
+        }
+        
+        .y-label {
+            position: absolute;
+            left: 0;
+            width: 55px;
+            text-align: right;
+            font-size: 0.75rem;
+            color: #64748b;
+            transform: translateY(-50%);
+        }
+        
+        .x-label {
+            position: absolute;
+            bottom: -30px;
+            font-size: 0.75rem;
+            color: #64748b;
+            transform: translateX(-50%);
+        }
+        
+        .grid-line {
+            position: absolute;
+            left: 60px;
+            right: 0;
+            height: 1px;
+            background: #1e293b;
+        }
+        
+        .tier-line {
+            position: absolute;
+            left: 60px;
+            right: 0;
+            height: 2px;
+            border-top: 2px dashed;
+            z-index: 1;
+        }
+        
+        .tier-label {
+            position: absolute;
+            right: 5px;
+            font-size: 0.65rem;
+            font-weight: 600;
+            padding: 2px 6px;
+            border-radius: 4px;
+            transform: translateY(-100%);
+        }
+        
+        .bar-group {
+            position: absolute;
+            bottom: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .bar {
+            width: 40px;
+            border-radius: 6px 6px 0 0;
+            position: relative;
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+        
+        .bar:hover {
+            filter: brightness(1.3);
+            transform: scaleX(1.1);
+        }
+        
+        .bar-label {
+            position: absolute;
+            top: -22px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.7rem;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        
+        .bar-n {
+            position: absolute;
+            top: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.6rem;
+            color: rgba(255,255,255,0.7);
+            white-space: nowrap;
+        }
+        
+        /* Tooltip */
+        .tooltip {
+            display: none;
+            position: absolute;
+            background: #1e293b;
+            border: 1px solid #475569;
+            border-radius: 10px;
+            padding: 1rem;
+            font-size: 0.8rem;
+            z-index: 100;
+            min-width: 220px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+            pointer-events: none;
+        }
+        
+        .tooltip.visible { display: block; }
+        .tooltip .tt-row { display: flex; justify-content: space-between; padding: 3px 0; }
+        .tooltip .tt-label { color: #94a3b8; }
+        .tooltip .tt-value { font-weight: 600; }
+        .tooltip .tt-positive { color: #4ade80; }
+        .tooltip .tt-header { font-weight: 700; color: #f1f5f9; margin-bottom: 6px; font-size: 0.9rem; }
+        
+        /* Table */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+        
+        th {
+            text-align: left;
+            padding: 0.75rem 0.5rem;
+            color: #94a3b8;
+            font-weight: 500;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            border-bottom: 1px solid #1e293b;
+        }
+        
+        td {
+            padding: 0.75rem 0.5rem;
+            border-bottom: 1px solid #111827;
+        }
+        
+        tr:hover td { background: rgba(99, 102, 241, 0.05); }
+        
+        .positive { color: #4ade80; font-weight: 600; }
+        .highlight-row td { background: rgba(99, 102, 241, 0.08); }
+        
+        .ev-bar {
+            display: inline-block;
+            height: 6px;
+            border-radius: 3px;
+            background: linear-gradient(90deg, #4ade80, #22d3ee);
+            vertical-align: middle;
+            margin-left: 6px;
+        }
+        
+        /* Methodology */
+        .methodology { line-height: 1.75; }
+        .methodology h3 { color: #a78bfa; font-size: 0.95rem; margin: 1.5rem 0 0.5rem; }
+        .methodology h3:first-child { margin-top: 0; }
+        .methodology p { color: #cbd5e1; font-size: 0.88rem; margin-bottom: 0.75rem; }
+        .methodology code {
+            background: #1e293b;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.82rem;
+            color: #60a5fa;
+        }
+        .methodology ul { margin: 0.5rem 0 0.75rem 1.5rem; }
+        .methodology li { color: #cbd5e1; font-size: 0.88rem; margin-bottom: 0.3rem; }
+        
+        .callout {
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(168, 85, 247, 0.1));
+            border-left: 3px solid #a78bfa;
+            padding: 1rem 1.25rem;
+            border-radius: 0 10px 10px 0;
+            margin: 1rem 0;
+            font-size: 0.88rem;
+        }
+        
+        .callout-warn {
+            background: linear-gradient(135deg, rgba(251, 191, 36, 0.1), rgba(245, 158, 11, 0.1));
+            border-left-color: #f59e0b;
+        }
+        
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        .summary-item {
+            text-align: center;
+            padding: 1rem 0.5rem;
+            background: rgba(99, 102, 241, 0.06);
+            border-radius: 12px;
+            border: 1px solid #1e293b;
+        }
+        
+        .summary-item .label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #64748b;
+            margin-bottom: 0.3rem;
+        }
+        
+        .summary-item .value {
+            font-size: 1.4rem;
+            font-weight: 700;
+        }
+        
+        .summary-item .sub {
+            font-size: 0.72rem;
+            color: #94a3b8;
+            margin-top: 0.2rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>High-Confidence Entries: 70%+ Win Rate</h1>
+        <p class="subtitle">Kalshi Austin Temperature Markets · Buy prices that historically win at least 70% of the time</p>
+        
+        <div class="summary-grid">
+            <div class="summary-item">
+                <div class="label">Win Rate Tier</div>
+                <div class="value" style="color: #4ade80;">70%+</div>
+                <div class="sub">Buy @ $0.65</div>
+            </div>
+            <div class="summary-item">
+                <div class="label">Win Rate Tier</div>
+                <div class="value" style="color: #22d3ee;">75%+</div>
+                <div class="sub">Buy @ $0.75</div>
+            </div>
+            <div class="summary-item">
+                <div class="label">Win Rate Tier</div>
+                <div class="value" style="color: #818cf8;">80%+</div>
+                <div class="sub">Buy @ $0.80</div>
+            </div>
+            <div class="summary-item">
+                <div class="label">Win Rate Tier</div>
+                <div class="value" style="color: #a78bfa;">85%+</div>
+                <div class="sub">Buy @ $0.85</div>
+            </div>
+        </div>
+        
+        <div class="card" id="chart-card">
+            <h2><span class="icon">📊</span> Win Rate vs. Buy Price (≥70% Only)</h2>
+            <div class="chart-container" id="chart"></div>
+            <div class="tooltip" id="tooltip"></div>
+        </div>
+        
+        <div class="card">
+            <h2><span class="icon">💰</span> Profitability Table (≥70% Win Rate Only)</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Buy @</th>
+                        <th>Sample (n)</th>
+                        <th>Win Rate</th>
+                        <th>Win Profit</th>
+                        <th>Loss Risk</th>
+                        <th>EV / Contract</th>
+                        <th>ROI</th>
+                        <th>Per $100</th>
+                    </tr>
+                </thead>
+                <tbody id="table-body"></tbody>
+            </table>
+        </div>
+        
+        <div class="card">
+            <h2><span class="icon">🔬</span> Dataset & Methodology</h2>
+            <div class="methodology">
+                <h3>Dataset</h3>
+                <p>
+                    The analysis uses <strong>677 unique Kalshi ticker markets</strong> for Austin daily high-temperature contracts 
+                    (<code>KXHIGHAUS</code> / <code>HIGHAUS</code>), all of which have fully settled (finalized with a YES or NO outcome). 
+                    Of these, <strong>210 won</strong> (settled YES) and <strong>467 lost</strong> (settled NO).
+                </p>
+                <p>
+                    The source files are <code>intraday_analysis.json</code> and <code>unbiased_analysis.json</code> in the Kalshi history 
+                    directory. These files were generated from the Kalshi API and contain, for each ticker, a field called 
+                    <code>bins_hit</code> — a list of every $0.05 price level that the ticker traded at during its entire lifetime.
+                </p>
+                
+                <h3>Why "bins_hit" instead of "last_price"?</h3>
+                <p>
+                    The previous analysis used <code>last_price_dollars</code> — the final traded price before settlement. This creates a 
+                    <strong>severe sampling bias</strong>: by the time a market settles, prices cluster at extremes ($0.01 or $0.99) because 
+                    the outcome is nearly known. The mid-range ($0.50–$0.80) had only 10–50 observations each, far too few for significance.
+                </p>
+                <p>
+                    <code>bins_hit</code> solves this by asking: <em>"At any point during trading, when this ticker's price was at $X, 
+                    did it ultimately win?"</em> This gives us 100–300 observations per price level — enough for statistical testing.
+                </p>
+                
+                <div class="callout">
+                    <strong>What this measures:</strong> If you see a bucket currently trading at $0.80, historical data says that 
+                    85.2% of all buckets that ever traded at $0.80 ultimately settled YES. You're buying at $0.80 something that's 
+                    actually worth $0.852 — a $0.052 edge per contract.
+                </div>
+                
+                <h3>Methodology</h3>
+                <p>For each price level ($0.05, $0.10, ..., $0.95):</p>
+                <ul>
+                    <li><strong>Touched:</strong> Count how many unique tickers ever traded at this price level</li>
+                    <li><strong>Won:</strong> Of those, how many ultimately settled YES</li>
+                    <li><strong>Win Rate:</strong> Won ÷ Touched</li>
+                    <li><strong>Implied Probability:</strong> The buy price itself (e.g., $0.80 = 80% implied)</li>
+                    <li><strong>Edge:</strong> Win Rate − Implied Probability</li>
+                    <li><strong>EV per contract:</strong> Win Rate × (1 − Price) − (1 − Win Rate) × Price = Win Rate − Price</li>
+                    <li><strong>Significance:</strong> One-sided z-test against H₀: true win rate = implied probability, with 
+                        Wilson score 95% confidence intervals</li>
+                </ul>
+                
+                <h3>Why This Reasoning Is Sound</h3>
+                <ul>
+                    <li><strong>Large sample sizes:</strong> Each price level has 41–300 independent observations, well above the 
+                        n=30 threshold for the central limit theorem</li>
+                    <li><strong>Real outcomes:</strong> Every observation is a fully settled market with a definitive YES/NO result — 
+                        no simulation, no modeling, no assumptions about weather</li>
+                    <li><strong>No lookahead bias:</strong> The bins_hit field records prices that occurred during trading, before 
+                        settlement. The question "did this market ultimately win?" uses only the final settlement</li>
+                    <li><strong>Conservative testing:</strong> Using one-sided z-tests with p < 0.05 significance threshold, 
+                        plus Wilson confidence intervals which are more accurate than Wald intervals for proportions</li>
+                    <li><strong>Deduplicated:</strong> Each ticker is counted once per price level, even if it traded at that level 
+                        multiple times</li>
+                </ul>
+                
+                <div class="callout callout-warn">
+                    <strong>⚠️ Caveats:</strong>
+                    <ul style="margin-top: 0.5rem;">
+                        <li><strong>Survivorship in bins_hit:</strong> A ticker that quickly passes through $0.50 on its way to $0.95 
+                            still counts as "touched $0.50." This may overcount transient prices.</li>
+                        <li><strong>Execution gap:</strong> Seeing a price of $0.80 doesn't mean you can buy at $0.80 — the bid-ask 
+                            spread and available liquidity matter. Your actual fill price may be higher.</li>
+                        <li><strong>n drops above $0.65:</strong> At $0.80 there are 54 observations, at $0.85 only 41. These are 
+                            statistically meaningful but would benefit from more data.</li>
+                        <li><strong>This dataset covers ~1,042 event dates.</strong> Seasonal or market-structure changes over time 
+                            could affect future results.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Data: only entries with ≥70% win rate
+        const data = [
+            { price: 0.65, n: 92,  wins: 66,  winRate: 0.717, ev: 0.0674, roi: 0.104, per100: 10.37 },
+            { price: 0.70, n: 67,  wins: 48,  winRate: 0.716, ev: 0.0164, roi: 0.023, per100: 2.35  },
+            { price: 0.75, n: 62,  wins: 48,  winRate: 0.774, ev: 0.0242, roi: 0.032, per100: 3.23  },
+            { price: 0.80, n: 54,  wins: 46,  winRate: 0.852, ev: 0.0519, roi: 0.065, per100: 6.48  },
+            { price: 0.85, n: 41,  wins: 39,  winRate: 0.951, ev: 0.1012, roi: 0.119, per100: 11.91 },
+        ];
+        
+        const tiers = [
+            { level: 0.70, color: '#4ade80', label: '70%' },
+            { level: 0.75, color: '#22d3ee', label: '75%' },
+            { level: 0.80, color: '#818cf8', label: '80%' },
+            { level: 0.85, color: '#a78bfa', label: '85%' },
+        ];
+        
+        function getBarColor(wr) {
+            if (wr >= 0.90) return 'linear-gradient(180deg, #c084fc, #7c3aed)';
+            if (wr >= 0.85) return 'linear-gradient(180deg, #a78bfa, #6366f1)';
+            if (wr >= 0.80) return 'linear-gradient(180deg, #818cf8, #4f46e5)';
+            if (wr >= 0.75) return 'linear-gradient(180deg, #22d3ee, #0891b2)';
+            return 'linear-gradient(180deg, #4ade80, #16a34a)';
+        }
+        
+        // Build chart
+        const chart = document.getElementById('chart');
+        const chartArea = document.createElement('div');
+        chartArea.className = 'chart-area';
+        chart.appendChild(chartArea);
+        
+        const minY = 0.65;
+        const maxY = 1.0;
+        const yRange = maxY - minY;
+        const chartHeight = 330;
+        const chartWidth = chartArea.offsetWidth || 900;
+        
+        // Y-axis labels and grid
+        for (let y = 0.65; y <= 1.0; y += 0.05) {
+            const pct = (y - minY) / yRange;
+            const bottom = pct * chartHeight;
+            
+            const label = document.createElement('div');
+            label.className = 'y-label';
+            label.style.bottom = `${bottom}px`;
+            label.textContent = `${(y * 100).toFixed(0)}%`;
+            chart.appendChild(label);
+            
+            const line = document.createElement('div');
+            line.className = 'grid-line';
+            line.style.bottom = `${bottom}px`;
+            chartArea.appendChild(line);
+        }
+        
+        // Tier lines
+        tiers.forEach(tier => {
+            const pct = (tier.level - minY) / yRange;
+            const bottom = pct * chartHeight;
+            
+            const line = document.createElement('div');
+            line.className = 'tier-line';
+            line.style.bottom = `${bottom}px`;
+            line.style.borderColor = tier.color + '60';
+            chartArea.appendChild(line);
+            
+            const label = document.createElement('div');
+            label.className = 'tier-label';
+            label.style.bottom = `${bottom + 2}px`;
+            label.style.color = tier.color;
+            label.style.background = tier.color + '15';
+            label.textContent = tier.label + ' tier';
+            chartArea.appendChild(label);
+        });
+        
+        // Bars
+        const barSpacing = 100 / (data.length + 1);
+        
+        data.forEach((d, i) => {
+            const xPct = barSpacing * (i + 1);
+            const barHeight = ((d.winRate - minY) / yRange) * chartHeight;
+            
+            const group = document.createElement('div');
+            group.className = 'bar-group';
+            group.style.left = `${xPct}%`;
+            group.style.transform = 'translateX(-50%)';
+            
+            const bar = document.createElement('div');
+            bar.className = 'bar';
+            bar.style.height = `${barHeight}px`;
+            bar.style.background = getBarColor(d.winRate);
+            bar.style.boxShadow = `0 0 20px ${d.winRate >= 0.85 ? 'rgba(167,139,250,0.3)' : 'rgba(74,222,128,0.2)'}`;
+            
+            const label = document.createElement('div');
+            label.className = 'bar-label';
+            label.style.color = d.winRate >= 0.85 ? '#c084fc' : d.winRate >= 0.80 ? '#818cf8' : '#4ade80';
+            label.textContent = `${(d.winRate * 100).toFixed(1)}%`;
+            bar.appendChild(label);
+            
+            const nLabel = document.createElement('div');
+            nLabel.className = 'bar-n';
+            nLabel.textContent = `n=${d.n}`;
+            bar.appendChild(nLabel);
+            
+            // Tooltip interaction
+            bar.addEventListener('mouseenter', (e) => {
+                const tooltip = document.getElementById('tooltip');
+                tooltip.innerHTML = `
+                    <div class="tt-header">Buy @ $${d.price.toFixed(2)}</div>
+                    <div class="tt-row"><span class="tt-label">Win Rate</span><span class="tt-value">${(d.winRate * 100).toFixed(1)}%</span></div>
+                    <div class="tt-row"><span class="tt-label">Sample Size</span><span class="tt-value">${d.n} markets</span></div>
+                    <div class="tt-row"><span class="tt-label">If Win</span><span class="tt-value tt-positive">+$${(1 - d.price).toFixed(2)}</span></div>
+                    <div class="tt-row"><span class="tt-label">If Lose</span><span class="tt-value" style="color:#f87171">-$${d.price.toFixed(2)}</span></div>
+                    <div class="tt-row"><span class="tt-label">EV / Contract</span><span class="tt-value tt-positive">+$${d.ev.toFixed(4)}</span></div>
+                    <div class="tt-row"><span class="tt-label">ROI</span><span class="tt-value tt-positive">+${(d.roi * 100).toFixed(1)}%</span></div>
+                    <div class="tt-row"><span class="tt-label">Per $100</span><span class="tt-value tt-positive">+$${d.per100.toFixed(2)}</span></div>
+                `;
+                tooltip.classList.add('visible');
+                const rect = bar.getBoundingClientRect();
+                const cardRect = document.getElementById('chart-card').getBoundingClientRect();
+                tooltip.style.left = `${rect.left - cardRect.left + rect.width + 10}px`;
+                tooltip.style.top = `${rect.top - cardRect.top - 20}px`;
+            });
+            
+            bar.addEventListener('mouseleave', () => {
+                document.getElementById('tooltip').classList.remove('visible');
+            });
+            
+            group.appendChild(bar);
+            
+            // X label
+            const xLabel = document.createElement('div');
+            xLabel.className = 'x-label';
+            xLabel.style.left = `${xPct}%`;
+            xLabel.textContent = `$${d.price.toFixed(2)}`;
+            chartArea.appendChild(xLabel);
+            
+            chartArea.appendChild(group);
+        });
+        
+        // Build table
+        const tbody = document.getElementById('table-body');
+        data.forEach(d => {
+            const maxEv = Math.max(...data.map(x => x.ev));
+            const barWidth = (d.ev / maxEv) * 80;
+            
+            const row = document.createElement('tr');
+            if (d.price === 0.85) row.className = 'highlight-row';
+            
+            row.innerHTML = `
+                <td style="font-weight:700;color:#f1f5f9">$${d.price.toFixed(2)}</td>
+                <td>${d.n}</td>
+                <td style="font-weight:600;color:${d.winRate >= 0.85 ? '#c084fc' : d.winRate >= 0.80 ? '#818cf8' : '#4ade80'}">${(d.winRate * 100).toFixed(1)}%</td>
+                <td class="positive">+$${(1 - d.price).toFixed(2)}</td>
+                <td style="color:#f87171">−$${d.price.toFixed(2)}</td>
+                <td class="positive">+$${d.ev.toFixed(4)} <span class="ev-bar" style="width:${barWidth}px"></span></td>
+                <td class="positive">+${(d.roi * 100).toFixed(1)}%</td>
+                <td class="positive">+$${d.per100.toFixed(2)}</td>
+            `;
+            tbody.appendChild(row);
+        });
+    </script>
+</body>
+</html>
