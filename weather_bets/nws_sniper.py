@@ -400,13 +400,47 @@ class CitySniper:
             logger.info(f"[Sniper/{self.city_code}] Already traded {new_label}")
             return
 
-        # Find the market
+        # ── MARKET-AWARE FILTER ──
+        # Fetch ALL buckets to find the market favorite.
+        # Only trade if our new bucket is AT or ABOVE the favorite.
+        # This prevents false positives from normal daytime temp climbing
+        # (e.g., 82°F at noon when forecast high is 85°F).
+        all_buckets = []
+        try:
+            if self.city_config:
+                all_buckets = await fetch_weather_markets(self.city_config, target_date=today)
+        except Exception as e:
+            logger.warning(f"[Sniper/{self.city_code}] Failed to fetch buckets: {e}")
+
+        if all_buckets:
+            # Find market favorite (highest YES price)
+            favorite = max(all_buckets, key=lambda b: b.yes_price)
+            fav_low = favorite.low_bound or 0
+            fav_label = favorite.label
+
+            # Our new bucket's lower bound
+            new_bucket_low = current_bucket[0]
+
+            if new_bucket_low < fav_low:
+                logger.info(
+                    f"[Sniper/{self.city_code}] ⏭️ SKIP — temp still climbing. "
+                    f"New bucket {new_label} is BELOW market favorite {fav_label} "
+                    f"(${favorite.yes_price:.2f}). Not a peak shift."
+                )
+                return
+
+            logger.info(
+                f"[Sniper/{self.city_code}] ✅ New bucket {new_label} is AT/ABOVE "
+                f"favorite {fav_label} — this is a genuine peak shift!"
+            )
+
+        # Find the specific market for our new bucket
         market = await self._find_bucket_market(current_f, today)
         if not market:
             logger.error(f"[Sniper/{self.city_code}] No market for {new_label}")
             return
 
-        # Price check
+        # Price check — don't buy if market already caught up
         if market["yes_price"] > MAX_BUY_PRICE:
             logger.info(
                 f"[Sniper/{self.city_code}] {new_label} at ${market['yes_price']:.2f} "
