@@ -29,33 +29,33 @@ from weather_bets.rounding_map import (
 
 logger = logging.getLogger(__name__)
 
-# ── Historical remaining-rise patterns (from 5yr KAUS data, clear days) ──
+# ── Historical remaining-rise patterns (from 10yr KAUS data, clear days) ──
 # month -> hour -> (avg_rise, p10_rise, p90_rise, n_samples)
 CLEAR_DAY_PATTERNS = {
-    1:  {10: (9.5, 5, 14, 82), 11: (6.1, 3, 10, 82), 12: (3.8, 2, 7, 82),
-         13: (2.1, 0, 4, 82),  14: (0.9, 0, 2, 82),  15: (1.0, 0, 2, 81)},
-    2:  {10: (10.4, 7, 15, 70), 11: (6.8, 4, 10, 70), 12: (4.1, 2, 6, 70),
-         13: (2.2, 1, 4, 70),   14: (1.0, 0, 2, 70),  15: (0.6, 0, 1, 70)},
-    3:  {10: (11.5, 6, 16, 75), 11: (8.2, 4, 12, 75), 12: (5.5, 2, 8, 75),
-         13: (3.2, 1, 6, 75),   14: (1.7, 0, 3, 75),  15: (0.7, 0, 2, 75)},
-    4:  {10: (11.1, 7, 15, 43), 11: (7.9, 4, 11, 43), 12: (5.2, 3, 8, 43),
-         13: (2.9, 1, 5, 43),   14: (1.4, 0, 3, 43),  15: (0.6, 0, 2, 43)},
-    5:  {10: (9.6, 6, 12, 34),  11: (7.1, 4, 9, 34),  12: (4.9, 2, 7, 34),
-         13: (3.0, 1, 5, 34),   14: (1.4, 0, 3, 34),  15: (0.9, 0, 1, 34)},
-    6:  {10: (9.5, 6, 13, 51),  11: (6.9, 4, 9, 51),  12: (4.8, 3, 7, 50),
-         13: (2.8, 1, 5, 51),   14: (1.7, 0, 3, 51),  15: (0.8, 0, 2, 51)},
-    7:  {10: (10.8, 8, 13, 51), 11: (7.7, 5, 10, 51), 12: (5.3, 3, 7, 51),
-         13: (3.0, 1, 4, 51),   14: (1.4, 0, 3, 51),  15: (1.1, 0, 2, 51)},
-    8:  {10: (10.6, 8, 13, 63), 11: (7.7, 6, 10, 63), 12: (5.3, 4, 7, 63),
-         13: (3.3, 2, 5, 63),   14: (1.7, 0, 3, 63),  15: (0.8, 0, 2, 63)},
-    9:  {10: (9.8, 8, 12, 72),  11: (6.8, 5, 9, 72),  12: (4.4, 3, 6, 72),
-         13: (2.8, 1, 4, 72),   14: (1.2, 0, 2, 72),  15: (0.6, 0, 2, 72)},
-    10: {10: (10.5, 8, 13, 79), 11: (6.9, 4, 9, 79),  12: (4.3, 2, 7, 79),
-         13: (2.4, 1, 4, 79),   14: (1.0, 0, 2, 79),  15: (0.3, 0, 1, 79)},
-    11: {10: (8.5, 5, 13, 67),  11: (5.4, 3, 8, 67),  12: (3.2, 1, 5, 67),
-         13: (1.4, 0, 3, 67),   14: (0.4, 0, 1, 67),  15: (0.6, 0, 1, 67)},
-    12: {10: (9.6, 5, 15, 59),  11: (6.1, 3, 10, 59), 12: (3.8, 1, 7, 59),
-         13: (2.0, 0, 3, 59),   14: (1.1, 0, 2, 59),  15: (1.2, 0, 1, 59)},
+    1:  {10: (9.3, 6, 14, 186), 11: (5.9, 3, 9, 185), 12: (3.5, 1, 6, 186),
+         13: (1.8, 0, 3, 186),  14: (0.9, 0, 2, 186),  15: (1.0, 0, 2, 185)},
+    2:  {10: (9.4, 5, 13, 149), 11: (6.2, 3, 9, 149), 12: (3.8, 1, 6, 149),
+         13: (2.1, 0, 4, 149),  14: (1.1, 0, 2, 149),  15: (0.7, 0, 1, 149)},
+    3:  {10: (10.9, 6, 16, 167), 11: (7.8, 4, 12, 167), 12: (5.1, 2, 8, 167),
+         13: (2.9, 1, 5, 167),   14: (1.4, 0, 3, 167),  15: (0.6, 0, 2, 167)},
+    4:  {10: (9.9, 6, 14, 146), 11: (7.2, 4, 10, 146), 12: (4.9, 2, 8, 146),
+         13: (3.0, 1, 6, 146),   14: (1.6, 0, 3, 146),  15: (0.9, 0, 2, 146)},
+    5:  {10: (8.6, 4, 12, 147), 11: (6.1, 3, 9, 146),  12: (4.2, 1, 7, 147),
+         13: (2.7, 1, 5, 147),   14: (1.5, 0, 3, 147),  15: (0.9, 0, 2, 147)},
+    6:  {10: (9.2, 6, 13, 148), 11: (6.8, 4, 10, 148), 12: (4.8, 3, 7, 147),
+         13: (3.0, 1, 5, 148),   14: (1.7, 0, 3, 148),  15: (1.0, 0, 2, 147)},
+    7:  {10: (9.7, 6, 13, 186), 11: (7.0, 4, 10, 186), 12: (4.8, 2, 7, 186),
+         13: (3.0, 1, 5, 186),   14: (1.7, 0, 3, 187),  15: (1.1, 0, 2, 186)},
+    8:  {10: (9.8, 6, 13, 180), 11: (7.0, 4, 10, 180), 12: (4.9, 3, 7, 180),
+         13: (3.3, 1, 5, 178),   14: (2.2, 0, 4, 180),  15: (1.5, 0, 2, 180)},
+    9:  {10: (8.9, 6, 12, 160), 11: (6.2, 4, 9, 160),  12: (4.1, 2, 6, 160),
+         13: (2.5, 1, 4, 160),   14: (1.3, 0, 3, 160),  15: (0.8, 0, 2, 160)},
+    10: {10: (10.5, 7, 14, 191), 11: (7.0, 4, 10, 191), 12: (4.5, 2, 7, 191),
+         13: (2.7, 1, 5, 191),   14: (1.5, 0, 3, 191),  15: (0.7, 0, 2, 191)},
+    11: {10: (8.2, 5, 12, 170), 11: (5.2, 3, 8, 170),  12: (3.0, 1, 5, 170),
+         13: (1.5, 0, 3, 170),   14: (0.6, 0, 1, 170),  15: (0.9, 0, 2, 170)},
+    12: {10: (9.2, 5, 14, 160), 11: (5.8, 3, 9, 160),  12: (3.4, 1, 6, 160),
+         13: (1.5, 0, 3, 160),   14: (0.7, 0, 2, 160),  15: (0.9, 0, 2, 160)},
 }
 
 # Month → earliest hour where p90-p10 range ≤ 4°F (2 Kalshi buckets)
@@ -63,6 +63,120 @@ EARLIEST_BET_HOUR = {
     1: 13, 2: 12, 3: 14, 4: 13, 5: 13, 6: 12,
     7: 12, 8: 11, 9: 10, 10: 13, 11: 12, 12: 13,
 }
+
+
+def predict_high_combined(
+    current_temp: float,
+    day_max: float | None,
+    current_hour: int,
+    month: int,
+    consensus_high: float | None = None,
+    nws_hourly: list[dict] | None = None,
+) -> dict:
+    """Combined prediction using forecasts + patterns + observed data.
+
+    Priority:
+      1. NWS hourly peak (tells us WHEN the high occurs and how much is left)
+      2. Consensus forecast (NWS + GFS + ICON + GEM weighted average)
+      3. Current observed max (floor — high can't go below this)
+      4. Historical pattern (confidence bands only)
+
+    Returns dict with 'predicted_high', 'pred_low', 'pred_high',
+    'peak_hour', 'source', 'confidence'.
+    """
+    # Floor: day max or current temp
+    floor = max(day_max or current_temp, current_temp)
+
+    # ── NWS Hourly: find peak hour and peak temp ──
+    nws_peak_temp = None
+    nws_peak_hour = None
+    if nws_hourly:
+        def _parse_hour(h):
+            raw = h.get("hour", 0)
+            if isinstance(raw, int):
+                return raw
+            return int(str(raw).split(":")[0])
+
+        for h in nws_hourly:
+            t = h.get("temp_f", 0)
+            hr = _parse_hour(h)
+            if nws_peak_temp is None or t > nws_peak_temp:
+                nws_peak_temp = t
+                nws_peak_hour = hr
+
+    # ── Historical pattern for confidence bands ──
+    pattern = CLEAR_DAY_PATTERNS.get(month, {}).get(current_hour)
+    if pattern:
+        avg_rise, p10_rise, p90_rise, n_samples = pattern
+    else:
+        avg_rise, p10_rise, p90_rise, n_samples = 0, 0, 0, 0
+
+    # ── Determine primary prediction ──
+    sources = []
+
+    # Source 1: NWS hourly peak
+    if nws_peak_temp is not None:
+        sources.append(("nws_hourly", nws_peak_temp))
+
+    # Source 2: Consensus forecast
+    if consensus_high is not None:
+        sources.append(("consensus", consensus_high))
+
+    # Source 3: Pattern-based
+    pattern_pred = floor + avg_rise
+    sources.append(("pattern", pattern_pred))
+
+    # Primary = highest of NWS hourly peak and consensus (they see the future)
+    # But never below the observed floor
+    if nws_peak_temp is not None and consensus_high is not None:
+        predicted = max(nws_peak_temp, consensus_high, floor)
+        source = "nws_hourly+consensus"
+    elif nws_peak_temp is not None:
+        predicted = max(nws_peak_temp, floor)
+        source = "nws_hourly"
+    elif consensus_high is not None:
+        predicted = max(consensus_high, floor)
+        source = "consensus"
+    else:
+        predicted = max(pattern_pred, floor)
+        source = "pattern_only"
+
+    # ── Confidence bands ──
+    # Use pattern P10/P90 as offset from FLOOR (not from prediction)
+    # But ensure prediction is within bounds
+    pred_low = max(floor + p10_rise, floor)
+    pred_high = floor + p90_rise
+
+    # If forecast says higher than pattern P90, widen the high bound
+    if predicted > pred_high:
+        pred_high = predicted + 1
+
+    # Ensure prediction is >= floor
+    predicted = max(predicted, floor)
+
+    # Confidence: tighter when NWS hourly and consensus agree
+    confidence = "low"
+    if nws_peak_temp is not None and consensus_high is not None:
+        spread = abs(nws_peak_temp - consensus_high)
+        if spread <= 2:
+            confidence = "high"
+        elif spread <= 4:
+            confidence = "medium"
+    elif consensus_high is not None:
+        confidence = "medium"
+
+    return {
+        "predicted_high": round(predicted),
+        "pred_low": round(pred_low),
+        "pred_high": round(pred_high),
+        "peak_hour": nws_peak_hour,
+        "source": source,
+        "confidence": confidence,
+        "pattern_pred": round(pattern_pred),
+        "nws_peak": nws_peak_temp,
+        "consensus": consensus_high,
+        "floor": floor,
+    }
 
 
 class BetEngine:
@@ -118,8 +232,13 @@ class BetEngine:
         month: int,
         sky_cover: str,
         buckets: list[dict],  # Kalshi bucket data with prices
+        day_max: float | None = None,
+        consensus_high: float | None = None,
+        nws_hourly: list[dict] | None = None,
     ) -> dict:
         """Evaluate whether to place a YES bet on the predicted bucket.
+
+        Uses combined prediction: consensus + NWS hourly + pattern + observed.
 
         Args:
             current_temp: Current temperature in °F
@@ -127,6 +246,9 @@ class BetEngine:
             month: Current month (1-12)
             sky_cover: NWS sky cover code (CLR, FEW, SCT, BKN, OVC)
             buckets: List of Kalshi bucket dicts with 'low_bound', 'yes_price', 'ticker'
+            day_max: Highest temperature observed today so far
+            consensus_high: Consensus forecast (NWS + models weighted avg)
+            nws_hourly: NWS hourly forecast [{"hour": 15, "temp_f": 86}, ...]
 
         Returns:
             Decision dict with 'action', 'reasoning', and bet details if action='bet'
@@ -161,18 +283,19 @@ class BetEngine:
             decision["reasoning"] = "Skip: YES bet already placed today"
             return decision
 
-        # Rule 4: Get remaining rise pattern for this month/hour
-        pattern = CLEAR_DAY_PATTERNS.get(month, {}).get(current_hour)
-        if not pattern:
-            decision["reasoning"] = f"Skip: no pattern data for month={month} hour={current_hour}"
-            return decision
+        # Rule 4: Combined prediction (forecast + pattern + observed)
+        prediction = predict_high_combined(
+            current_temp=current_temp,
+            day_max=day_max,
+            current_hour=current_hour,
+            month=month,
+            consensus_high=consensus_high,
+            nws_hourly=nws_hourly,
+        )
 
-        avg_rise, p10_rise, p90_rise, n_samples = pattern
-
-        # Predicted high range
-        pred_low = current_temp + p10_rise
-        pred_high = current_temp + p90_rise
-        pred_mid = round(current_temp + avg_rise)
+        pred_low = prediction["pred_low"]
+        pred_high = prediction["pred_high"]
+        pred_mid = prediction["predicted_high"]
 
         # How many Kalshi buckets does this span?
         pred_buckets = set()
@@ -400,6 +523,8 @@ class BetEngine:
         sky_cover: str,
         buckets: list[dict],
         day_max: int | None = None,
+        consensus_high: float | None = None,
+        nws_hourly: list[dict] | None = None,
     ) -> dict:
         """Buy YES on the market favorite when priced in the 45-68¢ sweet spot.
 
@@ -441,22 +566,19 @@ class BetEngine:
             )
             return decision
 
-        # ── Predict daily high using hour-specific remaining rise ──
-        pattern = CLEAR_DAY_PATTERNS.get(month, {}).get(current_hour)
-        if not pattern:
-            decision["reasoning"] = (
-                f"Skip: no pattern data for month={month} hour={current_hour}"
-            )
-            return decision
+        # ── Predict daily high using combined forecast + pattern ──
+        prediction = predict_high_combined(
+            current_temp=current_temp,
+            day_max=day_max,
+            current_hour=current_hour,
+            month=month,
+            consensus_high=consensus_high,
+            nws_hourly=nws_hourly,
+        )
 
-        avg_rise, p10_rise, p90_rise, n_samples = pattern
-        predicted_high = round(current_temp + avg_rise)
-        pred_low = current_temp + p10_rise
-        pred_high_bound = current_temp + p90_rise
-
-        # Use day_max from Synoptic as a floor (high can't be below what we've seen)
-        if day_max and day_max > predicted_high:
-            predicted_high = day_max
+        predicted_high = prediction["predicted_high"]
+        pred_low = prediction["pred_low"]
+        pred_high_bound = prediction["pred_high"]
 
         # Prediction confidence: how many buckets does the range span?
         pred_range = pred_high_bound - pred_low

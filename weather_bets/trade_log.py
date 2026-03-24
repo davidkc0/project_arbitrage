@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 # Store in the weather_bets directory
 LOG_DIR = Path(__file__).parent / "data"
 TRADES_FILE = LOG_DIR / "trades.json"
+DRY_TRADES_FILE = LOG_DIR / "dry_trades.json"
 SCANS_FILE = LOG_DIR / "scans.json"
 
 
@@ -31,13 +32,27 @@ def load_trades() -> list[dict]:
 
 
 def save_trade(trade: dict) -> None:
-    """Append a trade to the persistent log."""
+    """Append a trade to the persistent log.
+    
+    Dry-run trades go to dry_trades.json; real trades go to trades.json.
+    """
     _ensure_dir()
-    trades = load_trades()
+    is_dry = trade.get("mode") == "dry"
+    target_file = DRY_TRADES_FILE if is_dry else TRADES_FILE
+    
+    existing = []
+    if target_file.exists():
+        try:
+            existing = json.loads(target_file.read_text())
+        except (json.JSONDecodeError, Exception):
+            existing = []
+    
     trade["logged_at"] = datetime.now(timezone.utc).isoformat()
-    trades.append(trade)
-    TRADES_FILE.write_text(json.dumps(trades, indent=2))
-    logger.info(f"[TradeLog] Saved trade #{len(trades)}: {trade.get('ticker', '?')} "
+    existing.append(trade)
+    target_file.write_text(json.dumps(existing, indent=2))
+    
+    label = "DRY" if is_dry else "LIVE"
+    logger.info(f"[TradeLog] Saved {label} trade #{len(existing)}: {trade.get('ticker', '?')} "
                 f"${trade.get('cost', 0):.2f}")
 
 

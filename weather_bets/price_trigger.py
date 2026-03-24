@@ -98,16 +98,14 @@ class PriceTriggerStrategy:
                     if not trigger.enabled:
                         continue
 
-                    # Check: is YES ask price at or below our buy threshold?
-                    if bucket.yes_price <= 0 or bucket.yes_price > trigger.buy_at:
+                    # The winning bucket's price RISES during the day
+                    # (from ~$0.20 toward $1.00 as certainty increases).
+                    # We buy when it first reaches our threshold on the way UP.
+                    if bucket.yes_price <= 0 or bucket.yes_price < trigger.buy_at:
                         continue
 
                     # Already bought this one?
                     if self.already_bought(bucket.ticker, trigger.buy_at):
-                        continue
-
-                    # Don't buy dead markets (price too close to 0 or 1)
-                    if bucket.yes_price < 0.10:
                         continue
 
                     # ── Risk Management: drawdown floor + 50% rule ──

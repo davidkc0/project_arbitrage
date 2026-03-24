@@ -13,11 +13,12 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pathlib import Path
 
 from weather_bets import config
-from weather_bets.edge_calculator import calculate_edges, calculate_spreads
 from weather_bets.executor import WeatherExecutor
 from weather_bets.historical import fetch_historical_temps, analyze_forecast_bias
 from weather_bets.kalshi_weather import fetch_weather_markets
-from weather_bets.llm_analyst import analyze_spread
+from weather_bets.nws_sniper import sniper_loop
+from weather_bets.weather_summary import build_weather_summary
+from weather_bets.claude_predictor import predict_high
 from weather_bets.models import BetDecision, BetRecommendation, EdgeOpportunity, ForecastData
 from weather_bets.nws_forecast import fetch_forecast, fetch_hourly_forecast
 from weather_bets.open_meteo import fetch_multi_model_forecast, build_consensus
@@ -47,13 +48,12 @@ scan_state = {
     "consensus": {},
     "buckets": {},
     "opportunities": [],
-    "spreads": [],
-    "recommendations": [],
     "placed_bets": load_trades(),  # Load from disk on startup
     "historical": [],
     "bias": {},
     "scan_log": [],
     "trade_summary": get_trade_summary(),
+    "hourly_today": [],  # NWS hourly forecast for today [{"hour": N, "temp_f": X}]
 }
 
 executor = WeatherExecutor()
@@ -91,8 +91,6 @@ async def run_scan_cycle():
 
     scan_state["last_scan"] = datetime.now(timezone.utc).isoformat()
     scan_state["opportunities"] = []
-    scan_state["spreads"] = []
-    scan_state["recommendations"] = []
     scan_state["scan_log"] = []
 
     def log(msg: str):
@@ -251,131 +249,66 @@ async def run_scan_cycle():
             except Exception:
                 pass
 
-            # Calculate per-bucket edges using CONSENSUS temp
-            # Pass current observed high + hourly for same-day bets
-            obs_high = current_observed_high if days_ahead == 1 else None
-            edges = calculate_edges(consensus_fc, buckets, days_ahead, obs_high, hourly)
-            scan_state["opportunities"].extend([
-                {
-                    "city": o.city, "date": o.date, "bucket": o.bucket.label,
-                    "ticker": o.bucket.ticker,
-                    "forecast": o.forecast_high,
-                    "consensus": round(consensus_high, 1),
-                    "our_prob": round(o.our_probability * 100, 1),
-                    "market_prob": round(o.market_probability * 100, 1),
-                    "edge": round(o.edge_percent, 1),
-                    "ev": round(o.expected_value, 3),
-                    "yes_price": o.bucket.yes_price,
-                }
-                for o in edges
-            ])
+            # ── Weather Summary + Claude Prediction ──
+            # Only do this for same-day (days_ahead==1) since that's when we trade
+            if days_ahead == 1 and buckets:
+                # Determine current hour in CT
+                ct_now = datetime.now(timezone(timedelta(hours=-5)))
+                current_hour_ct = ct_now.hour
+                month = ct_now.month
 
-            # Build spread bets using CONSENSUS temp
-            spreads = calculate_spreads(consensus_fc, buckets, days_ahead, obs_high, hourly)
+                # Build model forecasts dict for weather summary
+                model_temps = {}
+                for mf in model_forecasts:
+                    if mf.get("date") == fc.date:
+                        model_temps[mf.get("model", "?")] = mf["high_f"]
 
-            for sp in spreads:
-                labels = " + ".join(b.label for b in sp.buckets)
-                scan_state["spreads"].append({
-                    "city": sp.city, "date": sp.date,
-                    "buckets": labels,
-                    "forecast": sp.forecast_high,
-                    "probability": round(sp.total_probability * 100, 1),
-                    "cost": round(sp.total_cost, 2),
-                    "profit": round(sp.profit_if_hit, 2),
-                    "ev": round(sp.expected_profit, 3),
-                    "roi": round(sp.roi_percent, 1),
-                    "n_buckets": len(sp.buckets),
-                })
+                # Get yesterday's high from historical data
+                yesterday_high = None
+                for h in (scan_state.get("historical") or []):
+                    if h["date"] < today_str:
+                        yesterday_high = h["high"]
 
-            bucket_summary = ""
-            for b in buckets:
-                bucket_summary += f"  {b.label:15} YES=${b.yes_price:.2f} NO=${b.no_price:.2f}\n"
+                # Get hourly data as list of dicts and store for intraday use
+                hourly_dicts = []
+                if hourly:
+                    hourly_dicts = hourly  # already list of {"hour": N, "temp_f": X}
+                    scan_state["hourly_today"] = hourly_dicts
 
-            # Find the best spread with positive EV and send to Claude
-            best_spreads = [s for s in spreads if s.expected_profit > 0]
-            if not best_spreads:
-                log(f"  No positive-EV spreads found")
-                continue
+                # Use Synoptic day_max (direct °F, no C→F rounding issues)
+                # Fall back to IEM DSM (settlement source), then NWS obs as last resort
+                synoptic_max = synoptic.get_trajectory().get("day_max") if synoptic else None
+                iem_max = intraday_state.get("iem_high")
+                best_observed_high = synoptic_max or iem_max or current_observed_high or intraday_state.get("latest_temp")
 
-            # Analyze top 2 spreads
-            for sp in best_spreads[:2]:
-                labels = " + ".join(b.label for b in sp.buckets)
-                log(f"\n🤖 Asking Claude about spread [{labels}] "
-                    f"(prob={sp.total_probability:.0%}, cost=${sp.total_cost:.2f}, "
-                    f"EV=${sp.expected_profit:+.3f})...")
+                # Build and print the weather summary
+                summary_text = build_weather_summary(
+                    city_name=city.name,
+                    current_temp_f=best_observed_high,
+                    day_max_f=best_observed_high,
+                    current_hour_ct=current_hour_ct,
+                    month=month,
+                    nws_forecast_high=fc.high_temp_f,
+                    model_forecasts=model_temps,
+                    consensus_high=consensus_high,
+                    hourly_forecast=hourly_dicts,
+                    yesterday_high=yesterday_high,
+                    sky_conditions=fc.short_forecast,
+                    buckets=buckets,
+                    iem_high=intraday_state.get("iem_high"),
+                )
 
-                try:
-                    rec = await analyze_spread(sp, bucket_summary, hourly)
-                except Exception as e:
-                    log(f"  ❌ LLM error: {e}")
-                    continue
-
-                labels = " + ".join(b.label for b in sp.buckets)
-                scan_state["recommendations"].append({
-                    "spread": labels,
-                    "decision": rec.decision.value,
-                    "confidence": round(rec.confidence * 100),
-                    "bet_size": rec.bet_size_usd,
-                    "probability": round(sp.total_probability * 100, 1),
-                    "cost": round(sp.total_cost, 2),
-                    "ev": round(sp.expected_profit, 3),
-                    "reasoning": rec.reasoning,
-                })
-
-                if rec.decision == BetDecision.BET:
-                    log(f"  ✅ Claude says BET: {rec.reasoning}")
-                    # Check for duplicate bets
-                    open_tickers = get_open_tickers()
-                    # Place individual orders for each leg
-                    for j, (bucket, alloc) in enumerate(zip(sp.buckets, rec.allocations)):
-                        if alloc <= 0:
-                            continue
-                        if bucket.ticker in open_tickers:
-                            log(f"  ⚠️ Already have open bet on {bucket.ticker} — skipping")
-                            continue
-                        from weather_bets.models import BetRecommendation, EdgeOpportunity
-                        single_rec = BetRecommendation(
-                            decision=BetDecision.BET,
-                            opportunity=EdgeOpportunity(
-                                city=sp.city, date=sp.date, bucket=bucket,
-                                forecast_high=sp.forecast_high,
-                                our_probability=sp.bucket_probabilities[j],
-                                market_probability=bucket.yes_price,
-                                edge=sp.bucket_probabilities[j] - bucket.yes_price,
-                                edge_percent=(sp.bucket_probabilities[j] - bucket.yes_price) * 100,
-                                expected_value=0, forecast_detail="",
-                            ),
-                            confidence=rec.confidence,
-                            bet_size_usd=alloc,
-                            reasoning=f"Spread leg: {rec.reasoning}",
-                            side="yes",
-                            ticker=bucket.ticker,
-                        )
-                        bet = await executor.place_bet(single_rec)
-                        trade_record = {
-                            "id": bet.id, "ticker": bet.ticker,
-                            "city": bet.city, "date": bet.date,
-                            "bucket": bet.bucket_label, "side": bet.side,
-                            "price": bet.price, "qty": bet.quantity,
-                            "cost": round(bet.cost_usd, 2),
-                            "edge": round(bet.edge_percent, 1),
-                            "our_prob": round(bet.our_probability * 100, 1),
-                            "market_prob": round(bet.market_probability * 100, 1),
-                            "spread": labels,
-                            "reasoning": rec.reasoning,
-                            "mode": config.EXECUTION_MODE,
-                            "time": bet.placed_at.isoformat(),
-                            "settled": False, "won": None, "pnl": None,
-                        }
-                        # Only save if the order was actually confirmed on Kalshi
-                        # A real order_id is a UUID (36 chars); stubs are 8-char hex
-                        if config.EXECUTION_MODE == "dry" or len(bet.id) > 10:
-                            save_trade(trade_record)
-                            scan_state["placed_bets"].append(trade_record)
-                        else:
-                            log(f"  ⚠️ Order not confirmed — not logging to trade log")
+                # Ask Claude for a prediction
+                log("\n🤖 Asking Claude for high temperature prediction...")
+                prediction = await predict_high(summary_text)
+                if prediction:
+                    scan_state["claude_prediction"] = prediction
+                    log(f"  🌡️  Claude predicts: {prediction.get('predicted_high_f')}°F "
+                        f"({prediction.get('confidence_low_f')}-{prediction.get('confidence_high_f')}°F)")
+                    log(f"  🏷️  Winning bucket: {prediction.get('winning_bucket')}")
+                    log(f"  💡 Trade: {prediction.get('trade_suggestion')}")
                 else:
-                    log(f"  ⏭️  Claude says SKIP: {rec.reasoning}")
+                    log("  ⚠️ Claude prediction unavailable")
 
     log(f"\n{'=' * 60}")
     bets_this_scan = len(scan_state['placed_bets']) - len(load_trades()) + len(scan_state['placed_bets'])
@@ -385,9 +318,8 @@ async def run_scan_cycle():
     save_scan_result({
         "forecasts": scan_state.get("forecasts", []),
         "consensus": scan_state.get("consensus", {}),
-        "spreads_found": len(scan_state.get("spreads", [])),
-        "recommendations": len(scan_state.get("recommendations", [])),
-        "bets_placed": len([r for r in scan_state.get("recommendations", []) if r.get("decision") == "bet"]),
+        "claude_prediction": scan_state.get("claude_prediction"),
+        "bets_placed": len(scan_state.get("placed_bets", [])),
     })
     scan_state["trade_summary"] = get_trade_summary()
 
@@ -665,6 +597,12 @@ async def intraday_loop():
                         bucket_dicts = []
 
                     if bucket_dicts:
+                        # Get forecast data for bet engine
+                        today_consensus = scan_state.get("consensus", {}).get(today_str, {})
+                        consensus_val = today_consensus.get("consensus_high") if today_consensus else None
+                        hourly_data = scan_state.get("hourly_today", [])
+                        day_max_val = synoptic.get_trajectory().get("day_max")
+
                         # ── Play 1: YES prediction ──
                         if not bet_engine.yes_bet_placed_today:
                             yes_decision = bet_engine.evaluate_yes_play(
@@ -673,6 +611,9 @@ async def intraday_loop():
                                 month=month,
                                 sky_cover=sky_cover,
                                 buckets=bucket_dicts,
+                                day_max=day_max_val,
+                                consensus_high=consensus_val,
+                                nws_hourly=hourly_data,
                             )
                             bet_engine.log_decision(yes_decision)
                             intraday_state["today_decisions"].append(yes_decision)
@@ -719,7 +660,9 @@ async def intraday_loop():
                                 month=month,
                                 sky_cover=sky_cover,
                                 buckets=bucket_dicts,
-                                day_max=synoptic.get_trajectory().get("day_max"),
+                                day_max=day_max_val,
+                                consensus_high=consensus_val,
+                                nws_hourly=hourly_data,
                             )
                             bet_engine.log_decision(fav_decision)
                             intraday_state["today_decisions"].append(fav_decision)
@@ -755,11 +698,13 @@ async def lifespan(app: FastAPI):
     scan_task = asyncio.create_task(scan_loop())
     settlement_task = asyncio.create_task(settlement_loop())
     intraday_task = asyncio.create_task(intraday_loop())
+    sniper_task = asyncio.create_task(sniper_loop(execution_mode=config.EXECUTION_MODE))
     # PriceWatcher + momentum loop DISABLED — see scan_loop comment
     yield
     scan_task.cancel()
     settlement_task.cancel()
     intraday_task.cancel()
+    sniper_task.cancel()
     bet_engine.save_session_log()
     await executor.close()
     await position_manager.close()

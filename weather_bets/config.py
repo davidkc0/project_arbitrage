@@ -20,7 +20,6 @@ KALSHI_BASE_URL: str = "https://api.elections.kalshi.com/trade-api/v2"
 
 # ── Betting Parameters ──────────────────────────────────────────────────
 BET_SIZE_USD: float = float(os.getenv("WEATHER_BET_SIZE", "10"))
-MIN_EDGE: float = float(os.getenv("WEATHER_MIN_EDGE", "0.10"))  # 10%
 SCAN_INTERVAL: int = int(os.getenv("WEATHER_SCAN_INTERVAL", "1800"))  # 30 min
 PRICE_WATCH_INTERVAL: int = int(os.getenv("WEATHER_PRICE_WATCH_INTERVAL", "120"))  # 2 min
 EXECUTION_MODE: str = os.getenv("WEATHER_EXECUTION_MODE", "dry")  # "dry" or "live"
@@ -34,11 +33,6 @@ DRAWDOWN_FLOOR_USD: float = float(os.getenv("WEATHER_DRAWDOWN_FLOOR", "15.0"))
 # we need strong conviction (our prob > bucket threshold + margin) to bet against it
 MARKET_CONVICTION_THRESHOLD: float = float(os.getenv("WEATHER_CONVICTION_THRESHOLD", "0.65"))
 
-# ── NWS Forecast Settings ───────────────────────────────────────────────
-# Standard deviation for temperature forecast uncertainty (°F)
-# NWS 24h forecasts are typically within ±2-3°F
-FORECAST_STDEV_24H: float = 3.0   # Next day (NWS can disagree with other sources by 2-3°F)
-FORECAST_STDEV_48H: float = 4.0   # Day after
 
 # ── City Definitions ────────────────────────────────────────────────────
 # Each city maps to its Kalshi series ticker, NWS grid, and airport station.
@@ -99,6 +93,61 @@ CITIES: dict[str, CityConfig] = {
         station_id="KDEN",
         lat=39.8561,    # Denver International Airport
         lon=-104.6737,
+    ),
+    "HOU": CityConfig(
+        code="HOU",
+        name="Houston",
+        kalshi_series="KXHIGHTHOU",
+        nws_office="HGX",
+        nws_grid_x=65,
+        nws_grid_y=97,
+        station_id="KIAH",
+        lat=29.9844,    # George Bush Intercontinental
+        lon=-95.3414,
+    ),
+    "DAL": CityConfig(
+        code="DAL",
+        name="Dallas",
+        kalshi_series="KXHIGHTDAL",
+        nws_office="FWD",
+        nws_grid_x=80,
+        nws_grid_y=108,
+        station_id="KDFW",
+        lat=32.8998,    # DFW International Airport
+        lon=-97.0403,
+    ),
+    "LAS": CityConfig(
+        code="LAS",
+        name="Las Vegas",
+        kalshi_series="KXHIGHTLV",
+        nws_office="VEF",
+        nws_grid_x=126,
+        nws_grid_y=59,
+        station_id="KLAS",
+        lat=36.0840,    # Harry Reid International Airport
+        lon=-115.1537,
+    ),
+    "SAT": CityConfig(
+        code="SAT",
+        name="San Antonio",
+        kalshi_series="KXHIGHTSATX",
+        nws_office="EWX",
+        nws_grid_x=140,
+        nws_grid_y=78,
+        station_id="KSAT",
+        lat=29.5337,    # San Antonio International Airport
+        lon=-98.4698,
+    ),
+    "PHX": CityConfig(
+        code="PHX",
+        name="Phoenix",
+        kalshi_series="KXHIGHTPHX",
+        nws_office="PSR",
+        nws_grid_x=159,
+        nws_grid_y=56,
+        station_id="KPHX",
+        lat=33.4373,    # Phoenix Sky Harbor International Airport
+        lon=-112.0078,
     ),
 }
 

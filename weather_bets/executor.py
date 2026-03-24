@@ -233,6 +233,8 @@ class WeatherExecutor:
         1. Hard floor: stop all betting if balance < DRAWDOWN_FLOOR_USD
         2. 50% rule: never put more than half total balance at risk across open bets
         3. Dynamic sizing: individual bet size = BET_SIZE_PCT of current balance
+
+        Source of truth: Kalshi portfolio API (not local trade log).
         """
         balance = await self.get_balance()
 
@@ -246,17 +248,45 @@ class WeatherExecutor:
 
         max_at_risk = balance * MAX_BALANCE_USAGE_PCT
 
-        # Subtract cost of existing open (unsettled) bets
-        from weather_bets.trade_log import load_trades
-        open_trades = [t for t in load_trades() if not t.get("settled")]
-        open_cost = sum(t.get("cost", 0) for t in open_trades)
+        # Query Kalshi for ACTUAL open positions (not local trade log)
+        open_cost = await self._get_kalshi_open_cost()
 
         remaining_budget = max(0, max_at_risk - open_cost)
         logger.info(
             f"[Executor] Budget: ${balance:.2f} balance × 50% = ${max_at_risk:.2f} max | "
-            f"${open_cost:.2f} open | ${remaining_budget:.2f} available to bet"
+            f"${open_cost:.2f} open (Kalshi) | ${remaining_budget:.2f} available to bet"
         )
         return remaining_budget
+
+    async def _get_kalshi_open_cost(self) -> float:
+        """Query Kalshi portfolio for total cost of open positions (held contracts)."""
+        try:
+            # Check actual positions (filled contracts awaiting settlement)
+            path = "/portfolio/positions"
+            full_path = f"/trade-api/v2{path}"
+            headers = self._auth_headers("GET", full_path)
+            resp = await self._http.get(path, headers=headers)
+            resp.raise_for_status()
+
+            positions = resp.json().get("market_positions", [])
+
+            total = 0.0
+            for pos in positions:
+                # Each position has quantity and average price paid
+                qty = pos.get("total_traded", 0)
+                # Position value = quantity * average entry price
+                # Kalshi reports prices in cents
+                market_exposure = pos.get("market_exposure", 0) / 100.0
+                if market_exposure > 0:
+                    total += market_exposure
+
+            if total > 0:
+                logger.info(f"[Executor] Open positions on Kalshi: ${total:.2f}")
+
+            return total
+        except Exception as e:
+            logger.warning(f"[Executor] Could not query Kalshi positions: {e}")
+            return 0.0  # Fail open — don't block trading on API errors
 
     def dynamic_bet_size(self, balance: float) -> float:
         """
