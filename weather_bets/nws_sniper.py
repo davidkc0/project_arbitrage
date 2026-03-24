@@ -424,14 +424,21 @@ class CitySniper:
             if new_bucket_low < fav_low:
                 logger.info(
                     f"[Sniper/{self.city_code}] ⏭️ SKIP — temp still climbing. "
-                    f"New bucket {new_label} is BELOW market favorite {fav_label} "
+                    f"New bucket {new_label} is BELOW favorite {fav_label} "
                     f"(${favorite.yes_price:.2f}). Not a peak shift."
                 )
                 return
 
+            if new_bucket_low == fav_low:
+                logger.info(
+                    f"[Sniper/{self.city_code}] ⏭️ SKIP — temp reached favorite "
+                    f"{fav_label} (${favorite.yes_price:.2f}). Market already knows."
+                )
+                return
+
             logger.info(
-                f"[Sniper/{self.city_code}] ✅ New bucket {new_label} is AT/ABOVE "
-                f"favorite {fav_label} — this is a genuine peak shift!"
+                f"[Sniper/{self.city_code}] ✅ New bucket {new_label} is ABOVE "
+                f"favorite {fav_label} (${favorite.yes_price:.2f}) — market is WRONG!"
             )
 
         # Find the specific market for our new bucket

@@ -1,0 +1,42 @@
+14:51:16 [INFO] [Sniper] Starting multi-city sniper (mode=dry)
+14:51:16 [INFO] [Sniper] Cities: AUS, LAX, CHI, MIA, DEN, HOU, DAL, LAS, SAT, PHX
+14:51:16 [INFO] [Sniper] Poll interval: 60s per city
+14:51:16 [INFO] [Sniper] Max buy price: $0.50
+14:51:16 [INFO] [Sniper]   AUS: 14:00-18:00 CT
+14:51:16 [INFO] [Sniper]   LAX: 13:00-17:00 PT
+14:51:16 [INFO] [Sniper]   CHI: 13:00-17:00 CT
+14:51:16 [INFO] [Sniper]   MIA: 14:00-17:00 ET
+14:51:16 [INFO] [Sniper]   DEN: 13:00-17:00 MT
+14:51:16 [INFO] [Sniper]   HOU: 14:00-18:00 CT
+14:51:16 [INFO] [Sniper]   DAL: 14:00-18:00 CT
+14:51:16 [INFO] [Sniper]   LAS: 13:00-17:00 PT
+14:51:16 [INFO] [Sniper]   SAT: 14:00-18:00 CT
+14:51:16 [INFO] [Sniper]   PHX: 13:00-17:00 PT
+14:51:16 [INFO] [Sniper/AUS] New day: 2026-03-24
+14:51:16 [INFO] [Sniper/LAX] New day: 2026-03-24
+14:51:16 [INFO] [Sniper/CHI] New day: 2026-03-24
+14:51:16 [INFO] [Sniper/MIA] New day: 2026-03-24
+14:51:16 [INFO] [Sniper/DEN] New day: 2026-03-24
+14:51:16 [INFO] [Sniper/HOU] New day: 2026-03-24
+14:51:16 [INFO] [Sniper/DAL] New day: 2026-03-24
+14:51:16 [INFO] [Sniper/LAS] New day: 2026-03-24
+14:51:16 [INFO] [Sniper/SAT] New day: 2026-03-24
+14:51:16 [INFO] [Sniper/PHX] New day: 2026-03-24
+14:51:16 [INFO] HTTP Request: GET https://api.weather.gov/stations/KDFW/observations/latest "HTTP/1.1 200 OK"
+14:51:16 [INFO] HTTP Request: GET https://api.weather.gov/stations/KDEN/observations/latest "HTTP/1.1 200 OK"
+14:51:16 [INFO] [Sniper/DAL] Initial: 29°C = 84°F → 84-85
+14:51:16 [INFO] [Sniper/DEN] Initial: 27°C = 81°F → 80-81
+14:51:16 [INFO] HTTP Request: GET https://api.weather.gov/stations/KLAX/observations/latest "HTTP/1.1 200 OK"
+14:51:16 [INFO] HTTP Request: GET https://api.weather.gov/stations/KPHX/observations/latest "HTTP/1.1 200 OK"
+14:51:16 [INFO] [Sniper/LAX] Initial: 21°C = 70°F → 70-71
+14:51:16 [INFO] [Sniper/PHX] Initial: 37°C = 99°F → 98-99
+14:51:16 [INFO] HTTP Request: GET https://api.weather.gov/stations/KORD/observations/latest "HTTP/1.1 200 OK"
+14:51:16 [INFO] [Sniper/CHI] Initial: 11°C = 52°F → 52-53
+14:51:16 [INFO] HTTP Request: GET https://api.weather.gov/stations/KSAT/observations/latest "HTTP/1.1 200 OK"
+14:51:16 [INFO] [Sniper/SAT] Initial: 31°C = 88°F → 88-89
+14:51:16 [INFO] HTTP Request: GET https://api.weather.gov/stations/KAUS/observations/latest "HTTP/1.1 200 OK"
+14:51:16 [INFO] [Sniper/AUS] Initial: 31°C = 88°F → 88-89
+14:51:17 [INFO] HTTP Request: GET https://api.weather.gov/stations/KIAH/observations/latest "HTTP/1.1 200 OK"
+14:51:17 [INFO] [Sniper/HOU] Initial: 28°C = 82°F → 82-83
+14:51:17 [INFO] HTTP Request: GET https://api.weather.gov/stations/KLAS/observations/latest "HTTP/1.1 200 OK"
+14:51:17 [INFO] [Sniper/LAS] Initial: 34°C = 93°F → 92-93
