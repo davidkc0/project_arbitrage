@@ -112,6 +112,41 @@
         "icon": 88.3,
         "gem": 91.0,
         "days_out": 3
+      },
+      "2026-03-25": {
+        "nws": 89,
+        "gfs": 87.8,
+        "icon": 87.0,
+        "gem": 90.5,
+        "days_out": 1
+      }
+    },
+    "actual_high": null,
+    "settled": false
+  },
+  {
+    "target_date": "2026-03-26",
+    "forecasts": {
+      "2026-03-25": {
+        "nws": 89,
+        "gfs": 85.9,
+        "icon": 88.2,
+        "gem": 90.1,
+        "days_out": 2
+      }
+    },
+    "actual_high": null,
+    "settled": false
+  },
+  {
+    "target_date": "2026-03-27",
+    "forecasts": {
+      "2026-03-25": {
+        "nws": 90,
+        "gfs": 91.0,
+        "icon": 87.6,
+        "gem": 90.2,
+        "days_out": 3
       }
     },
     "actual_high": null,

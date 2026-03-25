@@ -16,6 +16,7 @@ from weather_bets import config
 from weather_bets.executor import WeatherExecutor
 from weather_bets.historical import fetch_historical_temps, analyze_forecast_bias
 from weather_bets.kalshi_weather import fetch_weather_markets
+from weather_bets import bucket_cache
 from weather_bets.nws_sniper import sniper_loop
 from weather_bets.weather_summary import build_weather_summary
 from weather_bets.claude_predictor import predict_high
@@ -579,7 +580,9 @@ async def intraday_loop():
                 city = config.CITIES.get("AUS")
                 if city:
                     try:
-                        buckets = await fetch_weather_markets(city, target_date=today_str)
+                        buckets = await bucket_cache.get_or_fetch(
+                            "AUS", city, today_str
+                        )
                         bucket_dicts = [
                             {
                                 "ticker": b.ticker,

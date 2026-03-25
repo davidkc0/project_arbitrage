@@ -26,6 +26,7 @@ from weather_bets.rounding_map import get_kalshi_bucket, get_bucket_label
 from weather_bets.kalshi_weather import fetch_weather_markets
 from weather_bets.trade_log import save_trade
 from weather_bets import config
+from weather_bets import bucket_cache
 
 logger = logging.getLogger(__name__)
 
@@ -204,11 +205,11 @@ class CitySniper:
     async def _load_kalshi_buckets(self, today: str):
         """Fetch and cache today's actual Kalshi bucket boundaries for this city."""
         if self._kalshi_buckets:
-            return  # Already loaded
+            return  # Already loaded for today
         try:
             if self.city_config:
-                self._kalshi_buckets = await fetch_weather_markets(
-                    self.city_config, target_date=today
+                self._kalshi_buckets = await bucket_cache.get_or_fetch(
+                    self.city_code, self.city_config, today
                 )
                 if self._kalshi_buckets:
                     labels = [b.label for b in sorted(
@@ -273,44 +274,7 @@ class CitySniper:
             logger.warning(f"[Sniper/{self.city_code}] NWS poll failed: {e}")
             return None
 
-    async def _find_bucket_market(self, target_f: int, today: str) -> dict | None:
-        """Find the Kalshi market for the bucket containing target_f."""
-        try:
-            if not self.city_config:
-                return None
-
-            buckets = await fetch_weather_markets(self.city_config, target_date=today)
-            target_bucket = get_kalshi_bucket(target_f)
-
-            for b in buckets:
-                if b.low_bound is not None and b.high_bound is not None:
-                    if (b.low_bound, b.high_bound) == target_bucket:
-                        return {
-                            "ticker": b.ticker,
-                            "yes_price": b.yes_price,
-                            "no_price": b.no_price,
-                            "label": b.label,
-                        }
-                # Edge buckets (≤X or ≥X)
-                if b.low_bound is None and b.high_bound is not None:
-                    if target_f <= b.high_bound:
-                        return {
-                            "ticker": b.ticker,
-                            "yes_price": b.yes_price,
-                            "no_price": b.no_price,
-                            "label": b.label,
-                        }
-                if b.high_bound is None and b.low_bound is not None:
-                    if target_f >= b.low_bound:
-                        return {
-                            "ticker": b.ticker,
-                            "yes_price": b.yes_price,
-                            "no_price": b.no_price,
-                            "label": b.label,
-                        }
-        except Exception as e:
-            logger.error(f"[Sniper/{self.city_code}] Failed to find market: {e}")
-        return None
+    # _find_bucket_market removed — was dead code, use _find_bucket_for_temp instead
 
     async def _execute_buy(
         self, ticker: str, yes_price: float, label: str,
@@ -473,7 +437,9 @@ class CitySniper:
         fresh_buckets = []
         try:
             if self.city_config:
-                fresh_buckets = await fetch_weather_markets(self.city_config, target_date=today)
+                fresh_buckets = await bucket_cache.refresh_prices(
+                    self.city_code, self.city_config, today
+                )
         except Exception as e:
             logger.warning(f"[Sniper/{self.city_code}] Failed to fetch fresh prices: {e}")
 

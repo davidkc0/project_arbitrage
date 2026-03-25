@@ -321,7 +321,7 @@ class BetEngine:
         target_bucket_keys = pred_buckets
         target_kalshi = []
         for bkt in buckets:
-            bkt_key = (int(bkt.get("low_bound", 0)), int(bkt.get("high_bound", 0)))
+            bkt_key = (int(bkt.get("low_bound") or 0), int(bkt.get("high_bound") or 0))
             if bkt_key in target_bucket_keys:
                 target_kalshi.append(bkt)
 
