@@ -171,10 +171,13 @@ class CitySniper:
         # Daily tracking state
         self._today: str = ""
         self._max_celsius: int | None = None
-        self._current_bucket: tuple[int, int] | None = None
+        self._current_bucket: str | None = None  # Now stores label string e.g. "86-87"
         self._trades_today: list[dict] = []
         self._last_poll_time: float = 0
-        self._bucket_traded: set[tuple[int, int]] = set()
+        self._bucket_traded: set[str] = set()  # Set of bucket labels already traded
+
+        # Real Kalshi bucket cache — fetched once per day
+        self._kalshi_buckets: list = []  # List of TemperatureBucket objects
 
     def _get_local_time(self) -> datetime:
         """Get current local time for this city."""
@@ -195,7 +198,59 @@ class CitySniper:
         self._current_bucket = None
         self._trades_today = []
         self._bucket_traded = set()
+        self._kalshi_buckets = []  # Force re-fetch
         logger.info(f"[Sniper/{self.city_code}] New day: {today}")
+
+    async def _load_kalshi_buckets(self, today: str):
+        """Fetch and cache today's actual Kalshi bucket boundaries for this city."""
+        if self._kalshi_buckets:
+            return  # Already loaded
+        try:
+            if self.city_config:
+                self._kalshi_buckets = await fetch_weather_markets(
+                    self.city_config, target_date=today
+                )
+                if self._kalshi_buckets:
+                    labels = [b.label for b in sorted(
+                        self._kalshi_buckets,
+                        key=lambda b: b.low_bound if b.low_bound is not None else -999
+                    )]
+                    logger.info(
+                        f"[Sniper/{self.city_code}] Loaded {len(self._kalshi_buckets)} "
+                        f"Kalshi buckets: {', '.join(labels)}"
+                    )
+        except Exception as e:
+            logger.warning(f"[Sniper/{self.city_code}] Failed to load buckets: {e}")
+
+    def _find_bucket_for_temp(self, temp_f: int) -> dict | None:
+        """Find which real Kalshi bucket contains this temperature.
+
+        Returns dict with 'label', 'low', 'high', 'ticker', 'yes_price', 'no_price'
+        or None if no buckets loaded or temp doesn't fit.
+        """
+        for b in self._kalshi_buckets:
+            # Edge bucket: ≤X
+            if b.low_bound is None and b.high_bound is not None:
+                if temp_f <= b.high_bound:
+                    return {
+                        "label": b.label, "low": None, "high": b.high_bound,
+                        "ticker": b.ticker, "yes_price": b.yes_price, "no_price": b.no_price,
+                    }
+            # Edge bucket: ≥X
+            elif b.high_bound is None and b.low_bound is not None:
+                if temp_f >= b.low_bound:
+                    return {
+                        "label": b.label, "low": b.low_bound, "high": None,
+                        "ticker": b.ticker, "yes_price": b.yes_price, "no_price": b.no_price,
+                    }
+            # Normal bucket: X-Y
+            elif b.low_bound is not None and b.high_bound is not None:
+                if b.low_bound <= temp_f <= b.high_bound:
+                    return {
+                        "label": b.label, "low": b.low_bound, "high": b.high_bound,
+                        "ticker": b.ticker, "yes_price": b.yes_price, "no_price": b.no_price,
+                    }
+        return None
 
     async def _poll_nws(self) -> int | None:
         """Fetch the latest NWS observation and return temperature in integer °C."""
@@ -348,21 +403,36 @@ class CitySniper:
             return
         self._last_poll_time = now_ts
 
+        # Load real Kalshi buckets (once per day)
+        await self._load_kalshi_buckets(today)
+        if not self._kalshi_buckets:
+            logger.warning(f"[Sniper/{self.city_code}] No Kalshi buckets loaded, skipping")
+            return
+
         # Poll NWS
         current_c = await self._poll_nws()
         if current_c is None:
             return
 
         current_f = celsius_to_settlement_f(current_c)
-        current_bucket = settlement_f_to_bucket(current_f)
+
+        # Find which REAL Kalshi bucket this temperature falls into
+        bucket_info = self._find_bucket_for_temp(current_f)
+        if not bucket_info:
+            logger.warning(
+                f"[Sniper/{self.city_code}] {current_f}°F doesn't fit any Kalshi bucket"
+            )
+            return
+
+        current_label = bucket_info["label"]
 
         # First reading
         if self._max_celsius is None:
             self._max_celsius = current_c
-            self._current_bucket = current_bucket
+            self._current_bucket = current_label
             logger.info(
                 f"[Sniper/{self.city_code}] Initial: {current_c}°C = {current_f}°F "
-                f"→ {get_bucket_label(current_f)}"
+                f"→ {current_label}"
             )
             return
 
@@ -373,10 +443,10 @@ class CitySniper:
         # ── NEW MAX ──
         old_c = self._max_celsius
         old_f = celsius_to_settlement_f(old_c)
-        old_bucket = self._current_bucket
+        old_label = self._current_bucket
 
         self._max_celsius = current_c
-        self._current_bucket = current_bucket
+        self._current_bucket = current_label
 
         logger.info(
             f"[Sniper/{self.city_code}] 🔥 NEW MAX: {old_c}°C ({old_f}°F) "
@@ -384,52 +454,50 @@ class CitySniper:
         )
 
         # Same bucket?
-        if current_bucket == old_bucket:
-            logger.info(f"[Sniper/{self.city_code}] Same bucket — no trade")
+        if current_label == old_label:
+            logger.info(f"[Sniper/{self.city_code}] Same bucket {current_label} — no trade")
             return
 
         # ── BUCKET SHIFT ──
-        old_label = get_bucket_label(old_f)
-        new_label = get_bucket_label(current_f)
         logger.info(
-            f"[Sniper/{self.city_code}] 🚨 BUCKET SHIFT: {old_label} → {new_label}! "
+            f"[Sniper/{self.city_code}] 🚨 BUCKET SHIFT: {old_label} → {current_label}! "
             f"({old_c}°C→{current_c}°C)"
         )
 
-        if current_bucket in self._bucket_traded:
-            logger.info(f"[Sniper/{self.city_code}] Already traded {new_label}")
+        if current_label in self._bucket_traded:
+            logger.info(f"[Sniper/{self.city_code}] Already traded {current_label}")
             return
 
         # ── MARKET-AWARE FILTER ──
-        # Fetch ALL buckets to find the market favorite.
-        # Only trade if our new bucket is AT or ABOVE the favorite.
-        # This prevents false positives from normal daytime temp climbing
-        # (e.g., 82°F at noon when forecast high is 85°F).
-        all_buckets = []
+        # Re-fetch fresh prices to get current favorite
+        fresh_buckets = []
         try:
             if self.city_config:
-                all_buckets = await fetch_weather_markets(self.city_config, target_date=today)
+                fresh_buckets = await fetch_weather_markets(self.city_config, target_date=today)
         except Exception as e:
-            logger.warning(f"[Sniper/{self.city_code}] Failed to fetch buckets: {e}")
+            logger.warning(f"[Sniper/{self.city_code}] Failed to fetch fresh prices: {e}")
 
-        if all_buckets:
+        if fresh_buckets:
+            # Update cached buckets with fresh prices
+            self._kalshi_buckets = fresh_buckets
+
             # Find market favorite (highest YES price)
-            favorite = max(all_buckets, key=lambda b: b.yes_price)
-            fav_low = favorite.low_bound or 0
+            favorite = max(fresh_buckets, key=lambda b: b.yes_price)
+            fav_low = favorite.low_bound if favorite.low_bound is not None else -999
             fav_label = favorite.label
 
             # Our new bucket's lower bound
-            new_bucket_low = current_bucket[0]
+            new_low = bucket_info["low"] if bucket_info["low"] is not None else -999
 
-            if new_bucket_low < fav_low:
+            if new_low < fav_low:
                 logger.info(
                     f"[Sniper/{self.city_code}] ⏭️ SKIP — temp still climbing. "
-                    f"New bucket {new_label} is BELOW favorite {fav_label} "
+                    f"New bucket {current_label} is BELOW favorite {fav_label} "
                     f"(${favorite.yes_price:.2f}). Not a peak shift."
                 )
                 return
 
-            if new_bucket_low == fav_low:
+            if new_low == fav_low:
                 logger.info(
                     f"[Sniper/{self.city_code}] ⏭️ SKIP — temp reached favorite "
                     f"{fav_label} (${favorite.yes_price:.2f}). Market already knows."
@@ -437,20 +505,20 @@ class CitySniper:
                 return
 
             logger.info(
-                f"[Sniper/{self.city_code}] ✅ New bucket {new_label} is ABOVE "
+                f"[Sniper/{self.city_code}] ✅ New bucket {current_label} is ABOVE "
                 f"favorite {fav_label} (${favorite.yes_price:.2f}) — market is WRONG!"
             )
 
-        # Find the specific market for our new bucket
-        market = await self._find_bucket_market(current_f, today)
+        # Re-lookup fresh price for our target bucket
+        market = self._find_bucket_for_temp(current_f)
         if not market:
-            logger.error(f"[Sniper/{self.city_code}] No market for {new_label}")
+            logger.error(f"[Sniper/{self.city_code}] No market for {current_label}")
             return
 
         # Price check — don't buy if market already caught up
         if market["yes_price"] > MAX_BUY_PRICE:
             logger.info(
-                f"[Sniper/{self.city_code}] {new_label} at ${market['yes_price']:.2f} "
+                f"[Sniper/{self.city_code}] {current_label} at ${market['yes_price']:.2f} "
                 f"> ${MAX_BUY_PRICE:.2f} — market caught up"
             )
             return
@@ -463,7 +531,7 @@ class CitySniper:
             market["ticker"], market["yes_price"], market["label"],
             http_client, auth_fn,
         )
-        self._bucket_traded.add(current_bucket)
+        self._bucket_traded.add(current_label)
 
     def get_status(self) -> dict:
         """Current state for API/dashboard."""
@@ -473,9 +541,7 @@ class CitySniper:
             "today": self._today,
             "max_celsius": self._max_celsius,
             "max_fahrenheit": celsius_to_settlement_f(self._max_celsius) if self._max_celsius else None,
-            "current_bucket": get_bucket_label(
-                celsius_to_settlement_f(self._max_celsius)
-            ) if self._max_celsius else None,
+            "current_bucket": self._current_bucket,
             "trades_today": len(self._trades_today),
             "trade_details": self._trades_today,
             "peak_window": self._peak_hours.get(
@@ -557,19 +623,18 @@ class MultiCitySniper:
         }
 
     async def poll_all(self):
-        """Poll all cities that are currently in their peak window."""
-        tasks = []
+        """Poll all cities sequentially (staggered to avoid Kalshi 429 rate limits)."""
         for code, sniper in self.snipers.items():
             if sniper._is_peak_hour() or sniper._today == "":
-                tasks.append(
-                    sniper.poll_and_act(
+                try:
+                    await sniper.poll_and_act(
                         http_client=self._http,
                         auth_fn=self._auth_headers if self._private_key else None,
                     )
-                )
-
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+                except Exception as e:
+                    logger.error(f"[Sniper/{code}] Poll error: {e}")
+                # Stagger Kalshi API calls to avoid 429
+                await asyncio.sleep(2)
 
     def get_status(self) -> dict:
         """Get status for all cities."""
